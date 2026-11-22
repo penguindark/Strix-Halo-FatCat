@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""stream-sim — replay FCTS v1 expert-routing traces against warm-tier
+cache policies (Phase B of the hot-cache work).
+
+Mirrors the engine's tier geometry: one cached object = one expert of one
+layer (3 matrix slices, ~23.5 MB avg), victim chosen by sampling 16
+candidates like stream.c does. Policies:
+
+  lru         least-recently-used
+  fifo        first-in-first-out (insertion order)
+  lfu         engine today: score = count / (1 + age_tokens/64)
+  quota<pct>  keeping quota: up to <pct>% of slots are "resident"
+              (protected from eviction). Promotion: 2nd hit while the quota
+              has room; once full, only objects scoring above a
+              periodically re-estimated threshold get in (with a demotion
+              swap found during eviction sampling). Victims are sampled
+              from the elastic remainder only.
+
+Usage: stream-sim.py TRACE.fcts [TRACE2.fcts ...] [--sizes=8,16,32,64]
+"""
+import os
+import random
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "py"))
+from read_trace import load  # noqa: E402
+
+EXPERT_BYTES = 23.5e6          # avg expert incl. 3 matrices (measured)
+DECAY = 64.0                   # engine's LFU decay constant (tokens)
+SAMPLE = 16                    # engine's victim sampling width
+
+
+class Tier:
+    """obj[key] = [count, last_t, resident, ins_seq]"""
+
+    def __init__(self, cap, policy, keep_pct=100, seed=7, decay=DECAY):
+        self.cap = cap
+        self.policy = policy
+        self.keep = keep_pct
+        self.decay = decay
+        self.obj = {}
+        self.resident_n = 0
+        self.threshold = float("inf")   # until first re-estimation
+        self.evictions = 0
+        self.promotions = 0
+        self.ins = 0
+        self.rng = random.Random(seed)
+
+    def score(self, key, t):
+        c, last, _, _ = self.obj[key]
+        return c / (1.0 + (t - last) / self.decay)
+
+    def _sample(self):
+        keys = list(self.obj.keys())
+        return self.rng.sample(keys, min(SAMPLE, len(keys)))
+
+    def _reestimate(self, t):
+        keys = list(self.obj.keys())
+        samp = self.rng.sample(keys, min(256, len(keys)))
+        scores = sorted((self.score(k, t) for k in samp), reverse=True)
+        idx = min(len(scores) - 1, max(0, int(len(scores) * self.keep / 100) - 1))
+        self.threshold = scores[idx]
+
+    def access(self, key, t):
+        self.ins += 1
+        o = self.obj.get(key)
+        if o is not None:
+            o[0] += 1
+            o[1] = t
+            if self.policy == "quota" and not o[2]:
+                room = self.resident_n < self.cap * self.keep / 100.0
+                if (room and o[0] >= 2) or self.score(key, t) > self.threshold:
+                    o[2] = True
+                    self.resident_n += 1
+                    self.promotions += 1
+            return True
+        if len(self.obj) >= self.cap:
+            self._evict(t)
+        self.obj[key] = [1, t, False, self.ins]
+        return False
+
+    def _evict(self, t):
+        cands = self._sample()
+        if self.policy == "lru":
+            victim = min(cands, key=lambda k: self.obj[k][1])
+        elif self.policy == "fifo":
+            victim = min(cands, key=lambda k: self.obj[k][3])
+        elif self.policy == "lfu":
+            victim = min(cands, key=lambda k: self.score(k, t))
+        else:  # quota
+            elastic = [k for k in cands if not self.obj[k][2]]
+            pool = elastic if elastic else cands
+            victim = min(pool, key=lambda k: self.score(k, t))
+            # swap residency if a sampled resident scores below the best
+            # elastic candidate (keeps the keep-region near top-K)
+            res = [k for k in cands if self.obj[k][2]]
+            if elastic and res:
+                wr = min(res, key=lambda k: self.score(k, t))
+                be = max(elastic, key=lambda k: self.score(k, t))
+                if self.score(be, t) > self.score(wr, t):
+                    self.obj[wr][2] = False
+                    self.obj[be][2] = True
+        if self.obj[victim][2]:
+            self.resident_n -= 1
+        del self.obj[victim]
+        self.evictions += 1
+        if self.evictions % 128 == 0:
+            self._reestimate(t)
+
+
+def hitrate(records, cap, policy, keep_pct=100, decay=DECAY):
+    if policy == "s3fifo":
+        return _s3fifo(records, cap)
+    tier = Tier(cap, policy, keep_pct, decay=decay)
+    hits = total = 0
+    for tok, layer, ids in records:
+        for e in ids:
+            total += 1
+            if tier.access((layer, e), tok):
+                hits += 1
+    return hits / total, tier
+
+
+def _s3fifo(records, cap):
+    """S3-FIFO (Yang et al. 2023): small FIFO (10%) + main FIFO (90%) +
+    ghost queue for evicted keys. Exact queues (O(1)), no sampling."""
+    small_cap = max(1, cap // 10)
+    main_cap = cap - small_cap
+    from collections import OrderedDict
+    small, main, ghost = OrderedDict(), OrderedDict(), OrderedDict()
+    hits = total = evictions = 0
+    for tok, layer, ids in records:
+        for e in ids:
+            k = (layer, e)
+            total += 1
+            if k in main:
+                main[k] = 1          # freq bit
+                hits += 1
+            elif k in small:
+                small[k] = 1
+                hits += 1
+            else:
+                if k in ghost:
+                    del ghost[k]
+                    main[k] = 0      # re-reference: straight to main
+                else:
+                    small[k] = 0
+                while len(small) > small_cap:
+                    k2, f = small.popitem(last=False)
+                    if f:
+                        main[k2] = 0
+                    else:
+                        ghost[k2] = 0
+                        while len(ghost) > cap:
+                            ghost.popitem(last=False)
+                while len(main) > main_cap:
+                    k2, f = main.popitem(last=False)
+                    if f:
+                        main[k2] = 0          # give one more chance
+                        main.move_to_end(k2)
+                    else:
+                        ghost[k2] = 0         # remember it was evicted
+                        while len(ghost) > cap:
+                            ghost.popitem(last=False)
+                while len(small) + len(main) > cap:  # drain overflow small->main
+                    k2, f = small.popitem(last=False)
+                    main[k2] = f
+                evictions += 1
+    class _S:  # stats shim so callers can unpack uniformly
+        promotions = 0
+    return hits / total, _S()
+
+
+def main():
+    paths = [a for a in sys.argv[1:] if not a.startswith("--")]
+    sizes = [8, 16, 32, 64]
+    for a in sys.argv[1:]:
+        if a.startswith("--sizes="):
+            sizes = [int(x) for x in a.split("=")[1].split(",")]
+    if not paths:
+        print(__doc__)
+        sys.exit(2)
+    policies = [("lru", 0, DECAY), ("s3fifo", 0, 0), ("fifo", 0, 0),
+                ("lfu", 0, 16), ("lfu", 0, 64), ("lfu", 0, 256),
+                ("quota", 80, 64), ("quota", 90, 64)]
+    for path in paths:
+        meta, records = load(path)
+        ntok = len({t for t, _, _ in records})
+        print(f"\n=== {os.path.basename(path)}: {len(records)} records, "
+              f"{ntok} tokens ===")
+        print(f"{'policy':>9} " + " ".join(f"{s}GB".rjust(7) for s in sizes))
+        for pol, keep, dec in policies:
+            row = []
+            for gb in sizes:
+                cap = max(8, int(gb * 1.073e9 / EXPERT_BYTES))
+                hr, _ = hitrate(records, cap, pol, keep or 100, dec or 1)
+                row.append(f"{100 * hr:6.1f}%")
+            name = (f"quota{keep}" if pol == "quota" else
+                    (f"lfu{dec}" if pol == "lfu" else pol))
+            print(f"{name:>9} " + " ".join(r.rjust(7) for r in row))
+
+
+if __name__ == "__main__":
+    main()

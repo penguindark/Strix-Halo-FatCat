@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""fatcat-chat — interactive chat with the FatCat engine.
+
+Keeps the model loaded and the KV cache warm across turns: only each new
+turn is prefilled, so conversation turns decode at normal speed.
+
+Usage:
+  tools/fatcat-chat MODEL.gguf [options]
+
+Options:
+  --system TEXT       system prompt
+  --context TEXT      context text prepended as a system message
+  --context-file FILE context read from a file (mutually usable with --system;
+                      system comes first, then context)
+  -n N                max tokens generated per turn (default 256)
+  --tokenizer PATH    HF tokenizer.json (default Manuals/model/tokenizer.json)
+  --server PATH       fatcat-run binary (default build/fatcat-run)
+  --warm MB           convenience: sets FATCAT_WARM_MB for the server
+  --kv-tokens N       convenience: sets FATCAT_KV_TARGET for the server
+  --script FILE       non-interactive: feed one user message per line
+  --cpu               disable the GPU backend for the server
+
+Environment passes through to the server (FATCAT_GPU, FATCAT_IDX,
+FATCAT_KV_F16, FATCAT_KV_HUGEPAGE, ...). OMP_WAIT_POLICY defaults to
+"passive" unless already set.
+
+In-session commands: /help, /clear, /status, /exit (type /help for all).
+"""
+import os
+import sys
+
+
+def _ensure_tokenizers():
+    try:
+        import tokenizers  # noqa: F401
+        return
+    except ImportError:
+        pass
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    venv = os.path.join(repo, ".venv", "bin", "python")
+    if os.path.exists(venv) and os.path.realpath(sys.executable) != os.path.realpath(venv):
+        os.execv(venv, [venv] + sys.argv)
+    sys.exit("fatcat-chat needs the 'tokenizers' package (use the repo .venv)")
+
+
+_ensure_tokenizers()
+import subprocess  # noqa: E402
+import time  # noqa: E402
+from tokenizers import Tokenizer  # noqa: E402
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+EOS_ID = 2  # </s>
+
+
+def parse_args(argv):
+    a = {"n": 256, "tokenizer": os.path.join(REPO, "Manuals/model/tokenizer.json"),
+         "server": os.path.join(REPO, "build", "fatcat-run"), "cpu": False}
+    args = list(argv)
+    pos = []
+    i = 0
+    while i < len(args):
+        t = args[i]
+        if t == "--system": a["system"] = args[i + 1]; i += 2
+        elif t == "--context": a["context"] = args[i + 1]; i += 2
+        elif t == "--context-file": a["context_file"] = args[i + 1]; i += 2
+        elif t == "-n": a["n"] = int(args[i + 1]); i += 2
+        elif t == "--tokenizer": a["tokenizer"] = args[i + 1]; i += 2
+        elif t == "--server": a["server"] = args[i + 1]; i += 2
+        elif t == "--warm": a["warm"] = args[i + 1]; i += 2
+        elif t == "--kv-tokens": a["kv"] = args[i + 1]; i += 2
+        elif t == "--script": a["script"] = args[i + 1]; i += 2
+        elif t == "--cpu": a["cpu"] = True; i += 1
+        elif t in ("-h", "--help"): print(__doc__); sys.exit(0)
+        elif t.startswith("-"): sys.exit(f"unknown option {t}")
+        else: pos.append(t); i += 1
+    if not pos:
+        print(__doc__); sys.exit(2)
+    a["model"] = pos[0]
+    return a
+
+
+class Server:
+    """Line protocol to fatcat-run --serve (see tools/fatcat-run.c)."""
+
+    def __init__(self, model, server_path, cpu):
+        env = dict(os.environ)
+        env.setdefault("OMP_WAIT_POLICY", "passive")
+        cmd = [server_path, model, "--serve"] + (["--cpu"] if cpu else [])
+        self.p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  text=True, bufsize=1, env=env)
+        while True:
+            line = self.p.stdout.readline()
+            if not line:
+                sys.exit("server died during startup (see its stderr above)")
+            if line.strip() == "READY":
+                break
+
+    def _cmd(self, line):
+        self.p.stdin.write(line + "\n")
+        self.p.stdin.flush()
+
+    def prefill(self, ids):
+        if not ids:
+            return
+        self._cmd("P " + " ".join(map(str, ids)))
+        r = self.p.stdout.readline()
+        if not r.startswith("OK"):
+            sys.exit(f"server prefill failed: {r.strip()}")
+
+    def info(self):
+        """(seq_len, kv_cap) in tokens; cap 0 = not yet allocated."""
+        self._cmd("I")
+        line = self.p.stdout.readline()
+        _, seq, cap = line.split()
+        return int(seq), int(cap)
+
+    def generate(self, max_new, eos=EOS_ID):
+        """Yield token ids as produced; final list available via .ids."""
+        self._cmd(f"G {max_new} {eos}")
+        ids, stopped = [], False
+        while True:
+            line = self.p.stdout.readline()
+            if not line:
+                raise RuntimeError("server died mid-generation")
+            if line.startswith("T "):
+                tok = int(line[2:])
+                ids.append(tok)
+                if tok == eos:
+                    stopped = True          # keep reading: GEN line follows
+                else:
+                    yield tok
+            elif line.startswith("GEN"):
+                break
+        self.stopped_on_eos = stopped
+        self.ids = ids
+
+
+def main():
+    a = parse_args(sys.argv[1:])
+    tk = Tokenizer.from_file(a["tokenizer"])
+    if "warm" in a: os.environ["FATCAT_WARM_MB"] = str(a["warm"])
+    if "kv" in a: os.environ["FATCAT_KV_TARGET"] = str(a["kv"])
+
+    sys_txt = a.get("system", "")
+    ctx_txt = ""
+    if "context_file" in a:
+        with open(a["context_file"]) as f:
+            ctx_txt = f.read()
+    if "context" in a:
+        ctx_txt = (ctx_txt + "\n" + a["context"]).strip()
+    sysblock = "\n\n".join(x for x in (sys_txt, ctx_txt) if x.strip())
+
+    print(f"loading model (one-time): {a['model']}", flush=True)
+    t0 = time.time()
+    srv = Server(a["model"], a["server"], a["cpu"])
+    print(f"engine ready in {time.time() - t0:.1f}s", flush=True)
+
+    def encode(s):
+        return tk.encode(s, add_special_tokens=False).ids
+
+    def seed():
+        """(Re)start the conversation: system/context block prefilled."""
+        srv._cmd("R")
+        srv.p.stdout.readline()
+        if sysblock:
+            srv.prefill(encode("[SYSTEM_PROMPT]" + sysblock + "[/SYSTEM_PROMPT] "))
+        return True
+
+    first_turn = seed()
+
+    def turn(text):
+        nonlocal first_turn
+        prefix = "" if first_turn else " "
+        prompt = prefix + "[INST] " + text + " [/INST]"
+        first_turn = False
+        t0 = time.time()
+        srv.prefill(encode(prompt))
+        t_pre = time.time() - t0
+        shown, t_gen0 = [], time.time()
+        printed = 0
+        for tok in srv.generate(a["n"]):
+            shown.append(tok)
+            if len(shown) % 8 == 0:
+                txt = tk.decode(shown)
+                if len(txt) > printed:
+                    print(txt[printed:], end="", flush=True)
+                    printed = len(txt)
+        gen = srv.ids                       # generated ids (incl. eos if hit)
+        # feed the assistant turn back so the KV matches the chat template
+        srv.prefill(gen if srv.stopped_on_eos else gen + [EOS_ID])
+        full = tk.decode([t for t in gen if t != EOS_ID])
+        if len(full) > printed:
+            print(full[printed:], end="", flush=True)
+        print()
+        dt = time.time() - t_gen0
+        seq, cap = srv.info()
+        ctx = f"{seq}/{cap} ({100.0 * seq / cap:.1f}%)" if cap else f"{seq}/?"
+        print(f"  [{len(gen)} tok | prefill {t_pre:.1f}s | decode {dt:.1f}s | "
+              f"{len(gen) / max(dt, 0.01):.2f} tok/s | ctx {ctx}]", flush=True)
+
+    HELP = """commands:
+  /help            show this help
+  /clear           forget the conversation (keeps system/context, restarts KV)
+  /status          show context usage
+  /exit            quit (also: /quit)
+  anything else    chat message"""
+
+    def show_status():
+        seq, cap = srv.info()
+        pct = f"{100.0 * seq / cap:.1f}%" if cap else "?"
+        print(f"ctx: {seq}/{cap} tokens ({pct})")
+
+    script = None
+    if "script" in a:
+        script = open(a["script"])
+    while True:
+        try:
+            if script:
+                line = script.readline()
+                if not line:
+                    break
+                user = line.rstrip("\n")
+                print(f"you> {user}")
+            else:
+                user = input("you> ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        cmd = user.strip().lower()
+        if not user.strip():
+            continue
+        if cmd in ("/exit", "/quit"):
+            break
+        if cmd == "/help":
+            print(HELP)
+            continue
+        if cmd == "/status":
+            show_status()
+            continue
+        if cmd in ("/clear", "/reset"):
+            first_turn = seed()
+            print("(conversation cleared)")
+            continue
+        if cmd.startswith("/"):
+            print(f"unknown command {cmd} - type /help")
+            continue
+        try:
+            turn(user)
+        except RuntimeError as ex:
+            print(f"error: {ex}")
+            break
+    srv.p.stdin.write("Q\n")
+    srv.p.stdin.flush()
+    srv.p.wait(timeout=30)
+
+
+if __name__ == "__main__":
+    main()

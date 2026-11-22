@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# mem-run — run a command under a hard memory cap: poll the child's memory
+# (PSS from /proc/<pid>/smaps_rollup when available - it apportions the shared
+# model mmap fairly; plain VmRSS otherwise) and SIGKILL it if it exceeds the
+# limit, so a runaway test can never threaten system memory.
+# Usage: mem-run <limit_mb> <cmd...>
+# Prints the observed peak at exit (child exit code is propagated).
+set -u
+if [ $# -lt 1 ]; then echo "usage: mem-run LIMIT_MB cmd..." >&2; exit 2; fi
+LIMIT_MB=$1; shift
+"$@" &
+PID=$!
+PEAK=0
+KILLED=0
+mem_mb() {   # anonymous memory: what actually threatens OOM.  Resident
+             # file pages (the streamed model mmap) are clean page cache -
+             # reclaimable under pressure - so counting them would starve
+             # perfectly safe runs while adding no OOM protection.
+    local p
+    p=$(awk '/^Anonymous:/{print $2}' /proc/$1/smaps_rollup 2>/dev/null)
+    [ -z "$p" ] && p=$(awk '/RssAnon:/{print $2}' /proc/$1/status 2>/dev/null)
+    [ -n "$p" ] && echo $((p / 1024))
+}
+while kill -0 "$PID" 2>/dev/null; do
+    MB=$(mem_mb "$PID")
+    if [ -n "${MB:-}" ]; then
+        [ "$MB" -gt "$PEAK" ] && PEAK=$MB
+        if [ "$MB" -gt "$LIMIT_MB" ]; then
+            echo "mem-run: mem ${MB} MB > limit ${LIMIT_MB} MB - killing pid $PID" >&2
+            kill -9 "$PID" 2>/dev/null
+            KILLED=1
+            break
+        fi
+    fi
+    sleep 0.2
+done
+wait "$PID" 2>/dev/null
+RC=$?
+[ "$KILLED" = 1 ] && RC=137
+echo "mem-run: peak mem ${PEAK} MB (limit ${LIMIT_MB} MB) rc=$RC" >&2
+exit $RC

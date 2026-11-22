@@ -1,0 +1,33 @@
+# Build artifacts
+build/
+cmake-build*/
+
+# Python virtual environment (recreate: python3 -m venv .venv && pip install numpy gguf tokenizers)
+.venv/
+__pycache__/
+*.pyc
+
+# Editor / OS cruft
+.vscode/
+.idea/
+.DS_Store
+
+# Generated data / traces
+*.trace
+*.log
+
+# Secrets — never commit
+.github_key
+*.pem
+*.key
+id_*
+!id_*.pub
+
+# Third-party reference documents kept locally but NOT redistributable
+# (AMD PPR PDFs/extracts, arXiv papers, vendor blog posts). See
+# Manuals/README.md for the source index.
+Manuals/strix-halo/
+Manuals/model/*.html
+Manuals/model/mistral-large4-hf-blog.md
+Manuals/model/mistral-large4-model-card.md
+Manuals/model/vllm-day0-mistral-large4.md
