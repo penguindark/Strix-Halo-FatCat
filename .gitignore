@@ -18,6 +18,7 @@ __pycache__/
 
 # Secrets — never commit
 .github_key
+.github_key.bak
 *.pem
 *.key
 id_*

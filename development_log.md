@@ -1596,3 +1596,16 @@ proven to be llama.cpp's lossy fast kernels, not a fatcat error.
 - CAVEAT for publishing: the AMD docs live in git HISTORY (since
   a10b06f). Before pushing anywhere, either start the public repo from a
   fresh single commit or scrub history with git filter-repo.
+
+## 2026-11-22 — Session 42l: public repo live + tools/publish.sh
+
+- Public repo pushed: github.com/penguindark/Strix-Halo-FatCat (single
+  snapshot commit from git archive of HEAD; clean history - no AMD docs,
+  no keys). Public clone lives at /home/user/app/Strix-Halo-FatCat.
+- .github_key was raw base64 without PEM armor (ssh: "error in libcrypto")
+  - re-armed, verified fingerprint, backup .github_key.bak.
+- LICENSE unified to MIT/penguindark in both repos (public repo's
+  GitHub-created LICENSE adopted).
+- tools/publish.sh: mirror dev HEAD -> public clone (wipe-except-.git,
+  git archive, snapshot commit "sync: <head>", push with the ssh key).
+  Guards: clean dev tree, deny-list of never-public paths, --dry-run.
