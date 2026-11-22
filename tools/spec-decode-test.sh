@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 # spec-decode-test.sh — standalone A/B of D3 prompt-lookup speculative decode.
 # RUN WITH THE ASSISTANT LLM STOPPED (hipMalloc fails otherwise -> CPU fallback).
 #

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 # budget-sweep.sh — tok/s and warm-tier hit rate vs tier budget.
 # Core P3 deliverable (docs/performance.md §3bis). RUN STANDALONE: each
 # config's peak RSS is ~16 GB process baseline + the tier budget, so the

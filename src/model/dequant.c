@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat scalar reference dequant kernels. See include/fatcat/dequant.h.
  *
  * Format semantics follow ggml (validated against gguf-py golden data):

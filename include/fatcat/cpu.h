@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat — CPU compute backend (P2b).
  *
  * Fused dequantize + GEMV kernels plus vector primitives for the always-

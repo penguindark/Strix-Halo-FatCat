@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 # mem-run — run a command under a hard memory cap: poll the child's memory
 # (PSS from /proc/<pid>/smaps_rollup when available - it apportions the shared
 # model mmap fairly; plain VmRSS otherwise) and SIGKILL it if it exceeds the

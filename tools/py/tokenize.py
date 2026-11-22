@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 """Tokenize a text file with the official Mistral-Large-4 tokenizer (HF format).
 
 Usage: .venv/bin/python tools/py/tokenize.py tokenizer.json < text.txt > tokens.txt

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat stream tier — warm-tier implementation (P3).
  *
  * Slot arena + open-addressing key table + LFU/recency scoring.

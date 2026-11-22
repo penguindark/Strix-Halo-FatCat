@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat — raw io_uring wrapper implementation (see uring.h).
  * Uses only io_uring_setup/io_uring_enter syscalls and the shared ring
  * mappings; no liburing. Straightforward SQ-producer flow:

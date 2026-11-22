@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat — GPU (ROCm/HIP) acceleration for the ML4 forward pass.
  *
  * Design (Strix Halo APU): CPU keeps control flow (rmsnorm, rope, router

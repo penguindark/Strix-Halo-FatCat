@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 """Compare two logit-dump .bin files row-wise: cosine sim + top-1 agreement.
 
 Usage: cmp_logits.py A.bin B.bin [rows_to_show] [vocab]

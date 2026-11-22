@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* tensor-dump — dequantize one tensor to raw little-endian f32 (row-major,
  * dims[0] fastest) using the bit-exact fatcat dequantizers.
  *

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat CPU backend — AVX-512 kernels (P2b).
  *
  * Fused dequant + GEMV row kernels and vector primitives. Zen 5 (Strix Halo)

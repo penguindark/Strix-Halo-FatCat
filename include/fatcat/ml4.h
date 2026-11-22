@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat — Mistral-Large-4 forward pass (scalar reference, streaming-friendly).
  *
  * Minimal but faithful implementation of the ML4 layer stack, designed for

@@ -1,5 +1,7 @@
 # project.md — FatCat Master Development Tracker
 
+> Author: Dario Deledda (MIT License, see `LICENSE`).
+
 > FatCat: a streaming LLM inference engine specialized for
 > **mistralai/Mistral-Large-4-1T-A52B** on **AMD Strix Halo (gfx1151)**.
 

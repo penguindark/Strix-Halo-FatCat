@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 # decode-tier-sweep.sh — read of decode speed vs warm-tier size (~5 min per tier).
 # RUN WITH THE ASSISTANT LLM STOPPED (hipMalloc fails otherwise -> CPU fallback).
 #

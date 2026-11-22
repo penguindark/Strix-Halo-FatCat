@@ -1609,3 +1609,12 @@ proven to be llama.cpp's lossy fast kernels, not a fatcat error.
 - tools/publish.sh: mirror dev HEAD -> public clone (wipe-except-.git,
   git archive, snapshot commit "sync: <head>", push with the ssh key).
   Guards: clean dev tree, deny-list of never-public paths, --dry-run.
+
+## 2026-11-22 — Session 42m: author + copyright everywhere
+
+- SPDX headers (MIT / "Dario Deledda") added to all 65 first-party source
+  files: C/H/HIP/C++ (src, include, tests, tools), Python + shell tools
+  (after shebang), CMakeLists.txt. Third-party artifacts (Manuals/model
+  tokenizer/tekken/template) deliberately untouched.
+- LICENSE copyright -> Dario Deledda; README top + License section and
+  project.md header carry the author line. Build clean.

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat — streaming MoE LLM engine for AMD Strix Halo.
  * Entry point (P0 smoke build). */
 #include <stdio.h>

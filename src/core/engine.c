@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat engine core implementation. See include/fatcat/engine.h.
  *
  * The engine owns the GGUF file, the ML4 model and a logits scratch row.

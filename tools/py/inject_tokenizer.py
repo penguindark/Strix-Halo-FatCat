@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 """Inject the real Mistral-Large-4 tokenizer (from HF tokenizer.json) into a
 GGUF whose tokenizer was stripped to a stub by the upstream quant repo.
 

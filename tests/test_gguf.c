@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* test_gguf — unit tests for the GGUF reader using synthetic files.
  * Builds a small GGUF v3 in memory (single-file) and a proper llama.cpp
  * style split GGUF (each part a self-contained GGUF; part 0 holds global

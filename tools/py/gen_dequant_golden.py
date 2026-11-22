@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 """Generate golden dequantization test data using gguf-py (the reference).
 
 Usage: .venv/bin/python tools/py/gen_dequant_golden.py <model.gguf> [...] <out.bin>

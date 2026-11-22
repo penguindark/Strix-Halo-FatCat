@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat — engine core: context lifecycle and the generation loop.
 
  * Wraps the GGUF reader + ML4 model into a prefill/decode API with greedy

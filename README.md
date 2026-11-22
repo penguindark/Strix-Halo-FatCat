@@ -1,5 +1,8 @@
 # FatCat
 
+Copyright (c) 2026 Dario Deledda — released under the MIT License (see
+`LICENSE`).
+
 A streaming LLM inference engine written in C23, specialized for
 **mistralai/Mistral-Large-4-1T-A52B** (1T-param MoE, ~52B active) on **AMD
 Strix Halo** (gfx1151, e.g. Ryzen AI Max+ 395, 128 GB unified memory).
@@ -148,8 +151,8 @@ across commands — see the header of `tools/fatcat-run.c`.
 
 ## License
 
-Code in this repository is released under the **MIT License** (see
-`LICENSE`). Notes:
+Copyright (c) 2026 **Dario Deledda**. Code in this repository is released
+under the **MIT License** (see `LICENSE`). Notes:
 
 - **Model weights are not part of this project.** You download them
   yourself (step 3); they remain under Mistral's and the quant publisher's

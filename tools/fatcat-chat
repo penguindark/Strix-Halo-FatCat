@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 """fatcat-chat — interactive chat with the FatCat engine.
 
 Keeps the model loaded and the KV cache warm across turns: only each new

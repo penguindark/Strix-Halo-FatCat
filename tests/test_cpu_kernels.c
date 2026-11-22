@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* test_cpu_kernels — AVX-512 fused dequant-GEMV kernels vs scalar reference.
  *
  * Reference = fatcat_dequant (bit-exact, validated vs gguf-py in

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat ML4 forward pass. See include/fatcat/ml4.h.
  *
  * Memory model: weights are read through the GGUF reader's mmap pointers only;

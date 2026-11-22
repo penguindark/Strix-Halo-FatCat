@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* test_stream — warm-tier policy tests: hits/evictions, LFU+recency survival,
  * pinning, concurrent same-key gets, data integrity.
  * Tier: 1 MB budget / 64 KB slots = 16 slots < 64 blocks -> eviction forced. */

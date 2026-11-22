@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat GGUF reader implementation. See include/fatcat/gguf.h.
  *
  * Split GGUF semantics follow llama.cpp: each part is a self-contained GGUF

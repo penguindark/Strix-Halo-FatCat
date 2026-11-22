@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 # chat-gpu.sh — interactive chat with the tuned standalone recipe.
 #
 # The assistant LLM MUST be stopped first (this box has 128 GB shared

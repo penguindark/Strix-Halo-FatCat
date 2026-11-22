@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 # d5-validate.sh — D5d/e acceptance gate (attention GPU kernels + indexer skip).
 # RUN WITH THE ASSISTANT LLM STOPPED (needs the GPU pool).
 #

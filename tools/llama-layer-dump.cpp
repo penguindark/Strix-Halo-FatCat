@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* llama-layer-dump — dump per-layer residual-stream states via the public
  * llama-ext.h per-layer embeddings API (llama_set/get_embeddings_layer_inp).
  *

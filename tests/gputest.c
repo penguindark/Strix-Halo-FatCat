@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* gputest — compare GPU gemv kernels vs CPU scalar path on real tensors. */
 #include <stdio.h>
 #include <stdlib.h>

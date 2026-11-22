@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat — GGUF v2/v3 file reader (single-file and split GGUF).
  *
  * mmap-based, bounds-checked parser for the GGUF container format:

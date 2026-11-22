@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* gguf-slice — extract a leading layer range (+ embeddings / lm_head) from a
  * (possibly split) GGUF into a new single-file GGUF.
  *

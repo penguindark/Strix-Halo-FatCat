@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 """Extract quantization codebook tables from ggml-common.h into a C source.
 
 Usage: .venv/bin/python tools/py/gen_quant_tables.py ggml-common.h > src/model/quant_tables.c

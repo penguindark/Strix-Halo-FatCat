@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat CPU backend — dispatch + scalar fallback (P2b).
  *
  * Public entry points route to the AVX-512 kernels (src/backend/cpu/avx512.c)

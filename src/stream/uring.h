@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat — minimal raw io_uring wrapper (no liburing dependency).
  * Internal to src/stream. Single-threaded use: one fill worker submits and
  * reaps; callers never touch the ring directly. */

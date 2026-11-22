@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* expert-profiler — measure routed-expert usage of Mistral-Large-4 on real text.
  *
  * Runs the scalar ML4 forward pass (router-exact for quantized models: router

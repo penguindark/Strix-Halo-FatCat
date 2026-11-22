@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 # FatCat expert-profiler — full-model run (949 tokens, GPU).
 # Shut down the assistant LLM first so the profiler gets all the RAM.
 #

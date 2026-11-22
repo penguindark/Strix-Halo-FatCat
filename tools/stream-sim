@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 """stream-sim — replay FCTS v1 expert-routing traces against warm-tier
 cache policies (Phase B of the hot-cache work).
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 """read_trace.py — inspect/validate FCTS v1 sequence traces (tools/trace_seq.h).
 
 Usage:

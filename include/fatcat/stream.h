@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat — expert streaming tier manager (P3).
  *
  * The warm tier: a fixed budget of RAM slots holding expert slices

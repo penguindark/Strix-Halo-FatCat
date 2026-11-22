@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 """Analyze a FatCat expert-hotness trace (FCT1) and report tier budgets.
 
 Usage: analyze_trace.py full-gpu.trace [--gb 8 16 24 32 48 64]

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* gpu-kbench: microbenchmark the HIP fused dequant-GEMV kernels.
  *
  * Measures, on real expert slices from a GGUF:

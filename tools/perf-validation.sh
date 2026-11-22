@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 # perf-validation.sh — standalone performance validation day.
 # RUN WITH THE ASSISTANT LLM STOPPED (needs the full 128 GB + GPU pool).
 #

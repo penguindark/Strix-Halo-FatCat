@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat GPU wrapper: thin C layer over the HIP implementation in
  * src/gpu/kernels.hip (compiled by hipcc). See include/fatcat/gpu.h. */
 #include <stdio.h>

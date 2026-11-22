@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* rope-check — golden comparison: ggml_rope_ext (real llama.cpp numerics)
  * vs fatcat's rope_cache_pos transcription, for the Mistral-Large-4 YaRN config.
  *

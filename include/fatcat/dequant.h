@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat — scalar reference dequantization kernels.
  *
  * Correctness-first (scalar C, no SIMD) implementations of the GGML quant

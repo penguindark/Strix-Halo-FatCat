@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat GPU kernels (HIP, gfx1151). Fused dequantize + GEMV.
  *
  * One thread block per output row; threads split the row's quantization

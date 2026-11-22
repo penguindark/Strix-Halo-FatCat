@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 # publish.sh — mirror the development repo's HEAD to the public GitHub repo.
 #
 # Exports the tracked tree of HEAD (git archive) into the public clone,

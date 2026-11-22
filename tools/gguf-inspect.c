@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* gguf-inspect — dump GGUF header, metadata and tensor directory.
  *
  * Usage: gguf-inspect <file.gguf> [--kv] [--tensors] [--all]

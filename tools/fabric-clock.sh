@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 # fabric-clock.sh — hold the AMD GPU fabric clock at max (D0, Session 38).
 #
 # On Strix Halo (gfx1151) the fabric/memory-side clock (fclk) drops when the

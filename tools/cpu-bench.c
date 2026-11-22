@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* cpu-bench — benchmark the CPU gemv backend on real GGUF tensors.
  *
  * Usage: cpu-bench MODEL.gguf TENSOR.NAME [n_out_limit] [reps]

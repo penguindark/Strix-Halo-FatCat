@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* test_topk — DSA indexer top-k selection vs brute force.
  *
  * fatcat_topk_select picks the k largest scores with a quickselect; ties are

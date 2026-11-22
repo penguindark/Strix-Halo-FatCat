@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* logit-dump — per-position fatcat logits for incremental decode testing.
  *
  * Loads the model, feeds tokens one at a time through the incremental

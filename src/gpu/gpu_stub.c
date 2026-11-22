@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat GPU stub: used when the project is built without HIP/ROCm.
  * Mirrors the impl symbols of src/gpu/kernels.hip and always fails, so
  * fatcat_gpu_init() returns false and callers use the CPU path. */

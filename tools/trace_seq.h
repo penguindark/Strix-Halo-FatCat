@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* trace_seq.h — per-token MoE routing sequence trace writer (FCTS v1).
  *
  * Records every router decision as it happens, for offline warm-tier cache

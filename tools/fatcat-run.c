@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* fatcat-run — generate tokens with the FatCat engine (P2 entry point).
  *
  * Usage: fatcat-run MODEL.gguf --tokens PROMPT.tokens -n N [--cpu]

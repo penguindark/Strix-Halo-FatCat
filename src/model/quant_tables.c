@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* Auto-generated from ggml-common.h (llama.cpp) by tools/py/gen_quant_tables.py.
  * GGML is MIT licensed. Do not edit by hand. */
 #include <stdint.h>

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 # ab-policy.sh — warm-tier eviction policy A/B (lfu vs s3fifo), GPU path.
 #
 # Runs logit-dump once per policy over the same token corpus, then compares

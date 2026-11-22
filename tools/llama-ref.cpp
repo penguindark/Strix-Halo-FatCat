@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* llama-ref — reference logits via llama.cpp for FatCat cross-checking.
  *
  * Loads a GGUF, feeds a pre-tokenized id sequence (whitespace-separated ints),

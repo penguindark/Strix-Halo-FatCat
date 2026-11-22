@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Dario Deledda
 """chat.py — interactive chat REPL for the FatCat engine.
 
 Spawns `fatcat-run MODEL.gguf --serve`, speaks its line protocol (see

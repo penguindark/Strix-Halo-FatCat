@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* llama-ref-multi — per-position reference logits via llama.cpp.
  *
  * Feeds a pre-tokenized sequence in ONE batch decode and dumps the logits

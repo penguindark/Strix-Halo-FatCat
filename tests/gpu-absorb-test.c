@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: 2026 Dario Deledda */
 /* gpu-absorb-test — bit-identity check for the D5e attention kernels:
  *   fatcat_gpu_absorb_q8_0      vs CPU absorb (dequant_q8_0 + dot_f32)
  *   fatcat_gpu_gemv_q8_0_batched vs CPU gemv (fatcat_cpu_gemv_q8_0 per head)
