@@ -124,6 +124,7 @@ int main(int argc, char **argv)
     int use_gpu = -1;
     int serve_mode = 0;
     const char *trace_path = NULL;
+    int oks[8]; int n_oks = 0;   /* --spec-oracle K list */
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--tokens") && i + 1 < argc) tok_path = argv[++i];
@@ -131,11 +132,17 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--cpu")) use_gpu = 0;
         else if (!strcmp(argv[i], "--serve")) serve_mode = 1;
         else if (!strcmp(argv[i], "--trace-seq") && i + 1 < argc) trace_path = argv[++i];
+        else if (!strcmp(argv[i], "--spec-oracle") && i + 1 < argc) {
+            char *s = argv[++i], *tok;
+            for (tok = strtok(s, ","); tok && n_oks < 8; tok = strtok(NULL, ","))
+                oks[n_oks++] = atoi(tok);
+        }
         else if (argv[i][0] != '-') model = argv[i];
         else { fprintf(stderr, "unknown arg %s\n", argv[i]); return 2; }
     }
     if (!model || (!serve_mode && !tok_path)) {
-        fprintf(stderr, "usage: %s MODEL.gguf (--tokens FILE [-n N] | --serve) [--cpu]\n", argv[0]);
+        fprintf(stderr, "usage: %s MODEL.gguf (--tokens FILE [-n N] | --serve) [--cpu]"
+                        " [--spec-oracle K,K,...]\n", argv[0]);
         return 2;
     }
 
@@ -178,6 +185,12 @@ int main(int argc, char **argv)
         fatcat_engine_close(e); free(prompt); return 1;
     }
 
+    if (n_oks) {   /* H2 oracle benchmark instead of the stats report */
+        int rc = fatcat_engine_spec_oracle(e, prompt, n, n_new, oks, n_oks);
+        free(prompt); fatcat_engine_close(e);
+        return rc ? 1 : 0;
+    }
+
     double ps, ds; size_t np, nd;
     fatcat_engine_stats(e, &ps, &ds, &np, &nd);
     {   /* warm-tier counters: the decode-vs-tier story lives in the hit rate */
@@ -199,6 +212,9 @@ int main(int argc, char **argv)
                     ss.hit_bytes / 1e9, ss.miss_bytes / 1e9,
                     ss.wait_bytes / 1e9, ss.cold_bytes / 1e9,
                     ss.ring_bytes / 1e9, ss.ring_spec_bytes / 1e9);
+        if (ss.prefill_skips)
+            fprintf(stderr, "prefill anti-thrash: %llu misses not promoted "
+                    "(FATCAT_NOPROMO)\n", (unsigned long long)ss.prefill_skips);
         {   /* expert-routing speculation: wrong guesses burn NVMe bandwidth
              * on reads that are never consumed */
             uint64_t est, esh;
@@ -208,6 +224,15 @@ int main(int argc, char **argv)
                         "early and used (%.1f%%)\n",
                         (unsigned long long)esh, (unsigned long long)est,
                         100.0 * esh / est);
+        }
+        {   /* H3 cache-aware tail-skip accounting */
+            uint64_t sn, sw;
+            fatcat_engine_skip_stats(e, &sn, &sw);
+            if (sn)
+                fprintf(stderr, "tail-skip: %llu cold experts dropped "
+                        "(dropped weight sum %.2f, avg %.4f/expert)\n",
+                        (unsigned long long)sn, sw / 1000.0,
+                        sw / 1000.0 / sn);
         }
         {   /* ground-truth block-device reads during the decode window */
             uint64_t iob, ios; double iot;

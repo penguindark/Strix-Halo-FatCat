@@ -112,4 +112,9 @@ struct fatcat_stream *fatcat_ml4_stream(fatcat_ml4 *m);
  * how many of the actual experts were correctly guessed. */
 void fatcat_ml4_get_spec(const fatcat_ml4 *m, uint64_t *total, uint64_t *hit);
 
+/* H3 cache-aware tail-skip counters: routed experts dropped (cold miss +
+ * weight below FATCAT_SKIP * w_top1) and the sum of their normalized
+ * weights scaled by 1000 (quality accounting). */
+void fatcat_ml4_get_skip(const fatcat_ml4 *m, uint64_t *n, uint64_t *w);
+
 #endif /* FATCAT_ML4_H */

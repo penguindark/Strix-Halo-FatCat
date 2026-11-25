@@ -1618,3 +1618,113 @@ proven to be llama.cpp's lossy fast kernels, not a fatcat error.
   tokenizer/tekken/template) deliberately untouched.
 - LICENSE copyright -> Dario Deledda; README top + License section and
   project.md header carry the author line. Build clean.
+
+## 2026-11-25 — Session 43: H2 oracle spec-decode benchmark (tooling)
+
+- Analysis of 6 external optimization proposals vs measured facts: H1
+  (O_DIRECT unified pool) invalid (32B alignment, S42f budget math, flat
+  tier curve); H4 (expert repack) low value (bandwidth-bound, not
+  queue-depth-bound; priority-queue A/B was flat); H5 (GPU/IO overlap)
+  already implemented (union prefetch + async GEMV, queue 0.003 s/tok);
+  H6 (prefill anti-thrash) cheap A/B, small expected gain; H3 (cache-aware
+  tail skip) needs FCTS v2 with router weights, ceiling ~1.4x; H2
+  (multi-token spec decode) is the only structural lever on bytes/token.
+- New: fatcat_engine_spec_oracle() + `fatcat-run --spec-oracle K,K,...` +
+  tools/spec-oracle.sh (tuned standalone recipe). Phase A greedily
+  generates N reference tokens; phase B rewinds to prompt end and refeds
+  the SAME sequence single-token (B1) vs batched forward_rows M=K (B2),
+  same warm-tier state -> amortization ratio R(K)=T_rows(K)/T_fwd(1) and
+  oracle tok/s projection E(alpha,K)/T_rows(K). Losslessness guaranteed
+  by construction (forward_rows rows are bit-identical to sequential
+  decode, D3 property).
+- Bug fixed during smoke: rows buffer must be kmax*n_vocab (first smoke
+  double-freed with 1 row). CPU smoke (1 GB tier): R(2)=1.38, R(4)=1.61
+  -> amortization real even cold; GPU verdict pending standalone run.
+
+## 2026-11-25 — Session 43b: H2 oracle verdict — NEGATIVE, spec-decode archived
+
+- Standalone GPU oracle run (474-tok prompt, 24 ref tok, 64 GB tier):
+  baseline 1.109 s/fwd (0.90 tok/s, cold-ish tier + prefill churn; bench
+  warm = 1.41). R(K)=T_rows(K)/T_fwd(1): K2 3.67 / K3 5.26 / K4 6.16 /
+  K6 7.08. GB/fwd scales LINEARLY with K (3.72 -> 15.72 at K4, 4.2x).
+- Root cause: forward_batched dedups expert loads per union, but reuse
+  needs many tokens per chunk (measured ~30x at C=256); at verify-sized
+  chunks (C=K<=6) 4 tokens x top-4 collide on ~1-2 experts/layer only ->
+  union ~= 3x single-token bytes, and the sync-GEMV batched path (no GPU
+  async pipe) adds time on top: R > K. Oracle (acceptance=100%) is
+  SLOWER than plain decode at every K: even a perfect draft model cannot
+  win on this engine as built.
+- Even a hypothetical dedup+async verify path caps at ~E/union-ratio:
+  K4 perfect -> ~1.6x; realistic alpha<=0.7 drafts -> ~1.2x. Not worth
+  building (no strong small draft exists for Mistral-Large-4 either).
+- DECISION: H2 rejected (mirrors D3). Speed work backlog: H3 (FCTS v2
+  router weights + offline tail-skip sim, CPU-only) then H6 A/B.
+
+## 2026-11-25 — Session 43c: H3 tooling built (FCTS v2 + skip-sim + engine FATCAT_SKIP)
+
+- FCTS v2: trace_seq records now carry the normalized router weights
+  (read_trace.py reads v1+v2; stream-sim adapted). New tools/skip-sim.py:
+  replays v2 traces against the engine-mirror S3-FIFO tier and sweeps
+  skip thresholds -> cold bytes saved vs router weight dropped.
+- Engine: FATCAT_SKIP=<tau> (default 0=off) cache-aware tail-skip in the
+  decode MoE path: cold-miss expert with w_k < tau*w_1 is dropped (no
+  prefetch, no slice), weights renormalized; hits never dropped; prefill
+  untouched. fatcat_stream_resident() probe added (no stats, no ref).
+  Counters -> "tail-skip:" stats line.
+- CPU smoke: SKIP=0.15 vs off -> identical 4-token output at 1 GB tier
+  (21 experts dropped, avg weight 0.052); v2 trace parses clean.
+- PRELIMINARY on the 113-token smoke trace @64 GB model tier: hit 79.9%,
+  cold 1.34 GB/tok; tau=0.15 saves only 1.7% of cold bytes for 0.20%
+  weight drop; tau=0.30 saves 4.9% for 1.06%. Cold bytes are only ~40%
+  of device traffic -> H3 speed ceiling is small; needs a real-length
+  trace before any tau decision. GPU capture instructions delivered.
+
+## 2026-11-25 — Session 43d: H3 verdict — NEGATIVE, tail-skip archived (flag stays, default off)
+
+- Real GPU-captured FCTS v2 trace (474-tok prompt + 64 decode tok, 64 GB
+  tier): skip-sim @64 GB -> baseline hit 87.6%, cold only 0.83 GB/tok.
+  Threshold sweep: tau=0.15 saves 0.7% of cold bytes (0.08% weight drop);
+  tau=0.30 saves 2.6% (0.49% drop). Device traffic measured 3.4-3.7
+  GB/tok, so cold expert bytes are ~25% of NVMe demand: even a perfect
+  skip cannot move decode >1-2%. Quality price is real, speed gain is
+  noise -> H3 REJECTED; FATCAT_SKIP remains opt-in (default 0) as a
+  measurement tool only. No tau adopted.
+- Why the hypothesis failed: at 64 GB the S3-FIFO tier already absorbs
+  nearly all hot experts (hit 87.6%); what remains cold is dominated by
+  first-touch/long-tail experts whose router weights are NOT small
+  (that is why they got into top-4 at all) -> the cold-and-low-weight
+  intersection the policy needs is tiny.
+- Speed-work scoreboard: H1/H4/H5 invalid-or-done, H2 rejected (S43b),
+  H3 rejected (this). Open backlog: H6 prefill no-promote A/B (hours,
+  expected +1-3%), D4 stage 2 indexer batching (optional).
+
+## 2026-11-26 — Session 43e: H6 prefill anti-thrash implemented (FATCAT_NOPROMO)
+
+- stream.c: prefill admission gate. fatcat_stream_set_prefill() marks the
+  batched-prefill window (ml4.c wraps forward_batched); while set, tier
+  misses follow FATCAT_NOPROMO: 1 = never promote (caller uses mmap view,
+  no tier slot consumed), 2 = promote only on a 2nd reference within the
+  same prefill (64k-entry seen table, cleared per prefill). Default 0 =
+  today's behavior. prefill_skips counter -> stats line. test_stream PASS.
+- CPU smoke (1 GB tier): gate fires (10767 misses not promoted), decode
+  sane; prefill itself slowed at the tiny tier (prefill reuses its own
+  experts within chunks -> policy 2 may be the better trade). GPU A/B
+  pending: baseline vs NOPROMO=1 vs NOPROMO=2, watch decode tok/s +
+  decode hit% (stats reset at prefill->decode boundary) + prefill tok/s.
+
+## 2026-11-26 — Session 43f: H6 A/B — ACCEPTED, FATCAT_NOPROMO=2 is the new default
+
+- Standalone GPU A/B (474-tok prompt, 48 decode tok, 64 GB tier):
+  base: hit 73.7% prefill 2.66 decode 0.85 tok/s
+  NP=1: hit 74.3% prefill 2.79 decode 0.88 (+3.5%)
+  NP=2: hit 74.3% prefill 2.90 decode 0.90 (+5.9%)
+- NP=2 (promote prefill misses only on 2nd reference) wins on BOTH axes:
+  decode +5.9%, prefill +9.0% (fewer one-shot promotions = fewer evictions
+  of reused experts, cheaper fills). NP=1 strictly worse than NP=2:
+  prefill does reuse its own experts within chunks.
+- Caveat: single prompt, run-to-run decode variance is real (0.85-0.93
+  seen for near-identical baselines); but both NP variants beat base and
+  NP=2 >= NP=1 consistently, and prefill gain is large vs typical noise.
+  Default flipped to 2 (FATCAT_NOPROMO=0 restores old behavior).
+- Speed-work scoreboard FINAL: H6 accepted (+~4-6%), H1/H3/H4 rejected,
+  H2 rejected, H5 already done. 64 GB tier stays the operating point.

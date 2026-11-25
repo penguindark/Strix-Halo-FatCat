@@ -115,7 +115,7 @@ def hitrate(records, cap, policy, keep_pct=100, decay=DECAY):
         return _s3fifo(records, cap)
     tier = Tier(cap, policy, keep_pct, decay=decay)
     hits = total = 0
-    for tok, layer, ids in records:
+    for tok, layer, ids, _ in records:
         for e in ids:
             total += 1
             if tier.access((layer, e), tok):
@@ -131,7 +131,7 @@ def _s3fifo(records, cap):
     from collections import OrderedDict
     small, main, ghost = OrderedDict(), OrderedDict(), OrderedDict()
     hits = total = evictions = 0
-    for tok, layer, ids in records:
+    for tok, layer, ids, _ in records:
         for e in ids:
             k = (layer, e)
             total += 1
@@ -187,7 +187,7 @@ def main():
                 ("quota", 80, 64), ("quota", 90, 64)]
     for path in paths:
         meta, records = load(path)
-        ntok = len({t for t, _, _ in records})
+        ntok = len({t for t, _, _, _ in records})
         print(f"\n=== {os.path.basename(path)}: {len(records)} records, "
               f"{ntok} tokens ===")
         print(f"{'policy':>9} " + " ".join(f"{s}GB".rjust(7) for s in sizes))

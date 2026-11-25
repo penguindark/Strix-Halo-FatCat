@@ -1,15 +1,19 @@
 /* SPDX-License-Identifier: MIT */
 /* SPDX-FileCopyrightText: 2026 Dario Deledda */
-/* trace_seq.h — per-token MoE routing sequence trace writer (FCTS v1).
+/* trace_seq.h — per-token MoE routing sequence trace writer (FCTS v2).
  *
  * Records every router decision as it happens, for offline warm-tier cache
- * policy simulation (tools/stream-sim). Complements expert-profiler's FCT1
- * aggregate hotness dumps with the actual per-token SEQUENCE, which is what
- * determines cache hit rates (temporal locality, domain shifts).
+ * policy simulation (tools/stream-sim, tools/skip-sim.py). Complements
+ * expert-profiler's FCT1 aggregate hotness dumps with the actual per-token
+ * SEQUENCE, which is what determines cache hit rates (temporal locality,
+ * domain shifts). v2 adds the normalized router weights, required by the
+ * H3 cache-aware tail-skip simulation.
  *
  * Format (little-endian):
- *   header: "FCTS" u32 version=1 u32 n_layers u32 n_experts u32 topk
- *   records (repeated): u32 token u32 layer u16 ids[topk]
+ *   v1 header: "FCTS" u32 version=1 u32 n_layers u32 n_experts u32 topk
+ *   v1 records: u32 token u32 layer u16 ids[topk]
+ *   v2 header: "FCTS" u32 version=2 u32 n_layers u32 n_experts u32 topk
+ *   v2 records: u32 token u32 layer u16 ids[topk] f32 weights[topk]
  *   (token = KV position; layer = global layer id; MoE layers only)
  *
  * Single-translation-unit use: include from one .c file per tool.
@@ -32,11 +36,12 @@ static void trace_seq_cb(void *ctx, uint32_t layer, uint32_t token,
                          const uint16_t *ids, const float *weights, uint32_t k)
 {
     trace_seq *t = (trace_seq *)ctx;
-    (void)weights;
     if (k != t->topk) return;   /* format assumes fixed topk */
     fwrite(&token, 4, 1, t->f);
     fwrite(&layer, 4, 1, t->f);
     fwrite(ids, 2, k, t->f);
+    if (weights) fwrite(weights, 4, k, t->f);
+    else for (uint32_t i = 0; i < k; i++) { float z = 0; fwrite(&z, 4, 1, t->f); }
     t->records++;
 }
 
@@ -46,7 +51,7 @@ static int trace_seq_open(trace_seq *t, const char *path, uint32_t n_layers,
     t->f = fopen(path, "wb");
     if (!t->f) return -1;
     fwrite("FCTS", 1, 4, t->f);
-    uint32_t v = 1;
+    uint32_t v = 2;
     fwrite(&v, 4, 1, t->f);
     fwrite(&n_layers, 4, 1, t->f);
     fwrite(&n_experts, 4, 1, t->f);

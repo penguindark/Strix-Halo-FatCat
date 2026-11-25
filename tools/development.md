@@ -47,9 +47,14 @@ router traces before touching the engine.
   persistent-engine server mode; chat template, `--system`/`--context[-file]`
   seeding, per-turn prefill with KV carried across turns, EOS stop,
   `--script` for non-interactive tests) ✅,
-  `trace_seq.h` + `py/read_trace.py` (FCTS v1 per-token expert sequence
-  traces via `--trace-seq` on logit-dump/fatcat-run; validator + sim
-  loader) ✅.
+  `trace_seq.h` + `py/read_trace.py` (FCTS v1/v2 per-token expert sequence
+  traces via `--trace-seq` on logit-dump/fatcat-run; v2 adds normalized
+  router weights for the H3 tail-skip study; validator + sim loader) ✅,
+  `skip-sim.py` (H3: replays FCTS v2 traces against the S3-FIFO tier model
+  and sweeps FATCAT_SKIP thresholds — cold bytes saved vs router weight
+  dropped, to pick tau before touching the engine) ✅,
+  `spec-oracle.sh` (H2: batched-verify cost measurement, verdict archived
+  in development_log S43b) ✅.
   Scripts allowed here (Python acceptable for analysis-only
   tools; engine itself stays C). Later: GGUF repacker for per-layer/tier mixed
   quantization (deferred step).

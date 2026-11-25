@@ -9,6 +9,7 @@
 #define _GNU_SOURCE
 #include "fatcat/engine.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -249,6 +250,97 @@ static int spec_step(fatcat_engine *e, uint32_t token, uint32_t *next_out)
     return 0;
 }
 
+/* ---------------- H2: oracle spec-decode benchmark ---------------- */
+
+int fatcat_engine_spec_oracle(fatcat_engine *e, const uint32_t *prompt,
+                              size_t n_prompt, size_t n,
+                              const int *ks, int n_ks)
+{
+    if (!e || !prompt || !n || !ks || n_ks <= 0) return -1;
+    fatcat_ml4_info info = fatcat_ml4_get_info(e->m);
+    size_t cap = fatcat_ml4_kv_cap(e->m);
+    if (n_prompt + n + 8 > cap) {
+        fprintf(stderr, "spec-oracle: KV cap %zu < prompt %zu + n %zu\n",
+                cap, n_prompt, n);
+        return -1;
+    }
+
+    /* Phase A: greedy reference generation (warms the tier like a real run) */
+    uint32_t *seq = malloc((n_prompt + n + 1) * sizeof *seq);
+    if (!seq) return -1;
+    memcpy(seq, prompt, n_prompt * sizeof *seq);
+    size_t len = n_prompt;
+    for (size_t i = 0; i < n; i++) {
+        if (fatcat_ml4_last_logits(e->m, &seq[len - 1], 1, e->logits)) {
+            free(seq); return -1;
+        }
+        seq[len++] = argmax_row(e->logits, info.n_vocab);
+    }
+    size_t n_gen = len - n_prompt;
+
+    /* measurement window helper: wall time + device bytes */
+    uint64_t sec0; double t0;
+    double t_single = 0; double gb_single = 0; size_t tok_single = 0;
+
+    /* Phase B1: single-token forwards (decode baseline), same KV start */
+    fatcat_ml4_rewind(e->m, n_prompt);
+    sec0 = diskstats_sectors(); t0 = now_s();
+    for (size_t i = 0; i < n_gen; i++) {
+        if (fatcat_ml4_forward(e->m, &seq[n_prompt + i], 1, NULL, NULL)) {
+            free(seq); return -1;
+        }
+    }
+    t_single = now_s() - t0; tok_single = n_gen;
+    gb_single = (diskstats_sectors() - sec0) * 512.0 / 1e9;
+
+    /* Phase B2: batched verification forwards of K tokens */
+    int kmax = 0;
+    for (int qi = 0; qi < n_ks; qi++)
+        if (ks[qi] > kmax && ks[qi] <= 32) kmax = ks[qi];
+    float *rows = malloc((size_t)kmax * (size_t)info.n_vocab * sizeof(float));
+    if (!rows) { free(seq); return -1; }
+    printf("spec-oracle: %zu ref tok, prompt %zu, vocab %u, Kmax %d\n",
+           n_gen, n_prompt, info.n_vocab, ks[n_ks - 1]);
+    printf("single-forward baseline: %.3f s/fwd  %.2f GB/fwd  -> %.2f tok/s\n",
+           t_single / tok_single, gb_single / tok_single, tok_single / t_single);
+    printf("     K   fwd_s   GB/fwd   R=t/T    E(a=.5) E(a=.7) E(a=.9)   tok/s a=.5/.7/.9\n");
+    for (int qi = 0; qi < n_ks; qi++) {
+        int K = ks[qi];
+        if (K < 2 || K > 32) continue;
+        fatcat_ml4_rewind(e->m, n_prompt);
+        sec0 = diskstats_sectors(); t0 = now_s();
+        int rc = 0; size_t fed = 0;
+        while (fed + 1 < n_gen) {
+            size_t k = n_gen - fed > (size_t)K ? (size_t)K : n_gen - fed;
+            if (fatcat_ml4_forward_rows(e->m, &seq[n_prompt + fed], k, rows)) {
+                rc = -1; break;
+            }
+            fed += k;
+        }
+        double t = now_s() - t0;
+        if (rc) { free(rows); free(seq); return -1; }
+        double T = t / (double)((fed + K - 1) / K);   /* avg time per fwd */
+        double gb = (diskstats_sectors() - sec0) * 512.0 / 1e9;
+        double R = T / (t_single / tok_single);
+        printf("    %3d  %6.3f  %6.2f  %6.2f", K, T, gb / ((fed + K - 1) / K), R);
+        double E3[3]; const double alph[3] = { 0.5, 0.7, 0.9 };
+        for (int j = 0; j < 3; j++) {
+            double a = alph[j];
+            E3[j] = (1.0 - pow(a, K + 1)) / (1.0 - a);
+            printf("  %8.2f", E3[j]);
+        }
+        printf("  ");
+        for (int j = 0; j < 3; j++)
+            printf(" %6.2f", E3[j] / T);
+        printf("\n");
+        fflush(stdout);
+    }
+    free(rows);
+    fatcat_ml4_rewind(e->m, n_prompt);
+    free(seq);
+    return 0;
+}
+
 fatcat_engine *fatcat_engine_open(const fatcat_engine_config *cfg,
                                   char *errbuf, size_t errlen)
 {
@@ -414,6 +506,12 @@ void fatcat_engine_espec_stats(const fatcat_engine *e, uint64_t *total,
                                uint64_t *hit)
 {
     fatcat_ml4_get_spec(e->m, total, hit);
+}
+
+/* H3 cache-aware tail-skip counters (see fatcat_ml4_get_skip). */
+void fatcat_engine_skip_stats(const fatcat_engine *e, uint64_t *n, uint64_t *w)
+{
+    fatcat_ml4_get_skip(e->m, n, w);
 }
 
 /* decode-window block-device reads (bytes, seconds) — ground-truth NVMe */

@@ -45,6 +45,21 @@ void fatcat_engine_context(const fatcat_engine *e, size_t *seq, size_t *cap);
  * fatcat/ml4.h); fires for prefill and decode steps. NULL clears. */
 void fatcat_engine_set_router_cb(fatcat_engine *e, fatcat_router_cb cb, void *ctx);
 
+/* H2 oracle speculative-decoding benchmark (measurement only, emits no
+ * text). Phase A greedily generates n tokens and records the reference
+ * sequence. Phase B rewinds to the prompt end and re-feeds that exact
+ * sequence (a) one token at a time and (b) in batched verification
+ * forwards of K tokens via fatcat_ml4_forward_rows — the same path the
+ * D3 verifier uses, bit-identical logits per position. This measures the
+ * amortization ratio R(K) = T_rows(K)/T_fwd(1) under identical warm-tier
+ * state, i.e. the upper bound of lossless spec-decode: with per-draft
+ * acceptance alpha, a real draft model yields E(alpha,K) tokens per
+ * forward at the measured T_rows(K). Prints the table on stdout.
+ * Returns 0 on success. */
+int fatcat_engine_spec_oracle(fatcat_engine *e, const uint32_t *prompt,
+                              size_t n_prompt, size_t n,
+                              const int *ks, int n_ks);
+
 /* Model dimensions (layers, experts, vocab) for tooling. */
 fatcat_ml4_info fatcat_engine_info(const fatcat_engine *e);
 
@@ -84,6 +99,9 @@ void fatcat_engine_spec_stats(const fatcat_engine *e, int *on,
 /* expert-routing speculation accuracy (next-layer prefetch hit rate) */
 void fatcat_engine_espec_stats(const fatcat_engine *e, uint64_t *total,
                                uint64_t *hit);
+
+/* H3 cache-aware tail-skip counters: experts dropped, dropped weight x1000 */
+void fatcat_engine_skip_stats(const fatcat_engine *e, uint64_t *n, uint64_t *w);
 
 /* decode-window block-device reads (bytes, seconds) — ground-truth NVMe.
  * self_bytes: device reads by this process only (rest is system noise). */

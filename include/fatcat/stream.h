@@ -34,6 +34,7 @@ typedef struct {
     uint64_t wait_bytes, cold_bytes;
     uint64_t ring_bytes;    /* bytes submitted to io_uring (true NVMe demand) */
     uint64_t ring_spec_bytes;  /* ...of which speculative-class (guesses) */
+    uint64_t prefill_skips; /* H6: prefill misses served without promoting */
     uint64_t n_slots, used_slots;
     size_t   slot_bytes;
 } fatcat_stream_stats;
@@ -79,6 +80,15 @@ void fatcat_stream_set_allocator(fatcat_stream *st, fatcat_stream_alloc_fn a,
 
 /* Advance the recency clock by one tick (call once per generated token). */
 void fatcat_stream_tick(fatcat_stream *st);
+
+/* Non-intrusive residency probe (H3 cache-aware routing): 1 if key is
+ * currently resident in the tier, else 0. No reference taken, no stats. */
+int fatcat_stream_resident(fatcat_stream *st, uint64_t key);
+
+/* H6 prefill anti-thrash: mark prefill phase on/off. While on, tier misses
+ * follow FATCAT_NOPROMO (default 2 = promote on 2nd reference; 1 = never
+ * promote; 0 = off, prefill admits like decode). */
+void fatcat_stream_set_prefill(fatcat_stream *st, int on);
 
 /* Emergency reclaim: evict resident slots (releasing their payload pages)
  * until used capacity fits keep_bytes. In-flight, pinned and referenced

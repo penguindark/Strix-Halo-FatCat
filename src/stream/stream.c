@@ -117,6 +117,14 @@ struct fatcat_stream {
                              * prefetches that were never consumed) */
     uint64_t ring_spec_bytes;  /* ...of which speculative-class requests */
     int fadv;               /* POSIX_FADV_DONTNEED streamed slices (D5f) */
+
+    /* H6 prefill anti-thrash (FATCAT_NOPROMO): while prefill_mode is set,
+     * tier misses apply an admission policy so prefill's one-shot experts
+     * do not evict decode-hot entries: 1 = never promote, 2 = promote only
+     * on a second reference within the same prefill (seen table). */
+    int prefill_mode, promo_policy;
+    uint64_t *seen; size_t seen_mask;   /* second-ref table (policy 2) */
+    uint64_t prefill_skips;             /* misses served without promoting */
 };
 
 /* ---------- helpers ---------- */
@@ -549,6 +557,17 @@ fatcat_stream *fatcat_stream_open(size_t budget_mb, size_t slot_bytes,
         const char *pol = getenv("FATCAT_POLICY");
         { const char *fa = getenv("FATCAT_FADV");    /* D5f page-cache guard */
           st->fadv = !fa || atoi(fa) != 0; }
+        { const char *np = getenv("FATCAT_NOPROMO"); /* H6 prefill anti-thrash */
+          st->promo_policy = np ? atoi(np) : 2;
+          /* default 2 (promote on 2nd ref): A/B S43f — decode +5.9%,
+           * prefill +9.0% vs off; never-promote (1) was worse on both. */
+          if (st->promo_policy < 0 || st->promo_policy > 2) st->promo_policy = 0;
+          if (st->promo_policy == 2) {
+              size_t sp = 1u << 16;
+              st->seen = calloc(sp, sizeof(uint64_t));
+              st->seen_mask = sp - 1;
+              if (!st->seen) st->promo_policy = 1;   /* degrade to never-promote */
+          } }
         if (!pol || strcmp(pol, "lfu") != 0) {   /* default: s3fifo */
             st->use_s3 = 1;
             st->small_cap = st->n_slots / 10;
@@ -609,10 +628,13 @@ void fatcat_stream_close(fatcat_stream *st)
         }
     free(st->slots); free(st->tab);
     free(st->gtab); free(st->gring);
+    free(st->seen);
     pthread_mutex_destroy(&st->mu);
     pthread_cond_destroy(&st->cv);
     free(st);
 }
+
+static int seen_probe(fatcat_stream *st, uint64_t key);
 
 const void *fatcat_stream_get(fatcat_stream *st, uint64_t key, int fd,
                               uint64_t file_off, size_t len, int *was_hit)
@@ -651,6 +673,17 @@ const void *fatcat_stream_get(fatcat_stream *st, uint64_t key, int fd,
             continue;
         }
         break;
+    }
+
+    /* miss: H6 prefill admission gate (mu held) */
+    if (st->prefill_mode && st->promo_policy) {
+        int second = (st->promo_policy == 2) && seen_probe(st, key);
+        if (!second) {
+            st->prefill_skips++;
+            st->misses++; st->miss_bytes += len; st->cold_bytes += len;
+            pthread_mutex_unlock(&st->mu);
+            return NULL;      /* caller falls back to its mmap view */
+        }
     }
 
     /* miss: claim a slot, fill outside the lock */
@@ -728,6 +761,42 @@ void fatcat_stream_tick(fatcat_stream *st)
     pthread_mutex_lock(&st->mu);
     st->clock++;
     pthread_mutex_unlock(&st->mu);
+}
+
+/* Non-intrusive residency probe (H3 cache-aware routing): 1 if key is
+ * currently resident in the tier, else 0. Takes no reference, records no
+ * hit/miss stats. A 0 may still be served from the GGUF mmap view. */
+int fatcat_stream_resident(fatcat_stream *st, uint64_t key)
+{
+    if (!st) return 0;
+    pthread_mutex_lock(&st->mu);
+    size_t *e = tab_find(st, key);
+    int res = (*e && st->slots[*e - 1].key == key) ? 1 : 0;
+    pthread_mutex_unlock(&st->mu);
+    return res;
+}
+
+/* H6: enter/leave prefill phase (admission policy FATCAT_NOPROMO applies
+ * to misses while set). Entering clears the second-reference table. */
+void fatcat_stream_set_prefill(fatcat_stream *st, int on)
+{
+    if (!st || st->promo_policy == 0) return;
+    pthread_mutex_lock(&st->mu);
+    if (on && st->seen) memset(st->seen, 0, (st->seen_mask + 1) * sizeof(uint64_t));
+    st->prefill_mode = on ? 1 : 0;
+    pthread_mutex_unlock(&st->mu);
+}
+
+/* record key in the prefill seen-set; returns 1 if it was already there
+ * (second reference within this prefill). caller holds mu. */
+static int seen_probe(fatcat_stream *st, uint64_t key)
+{
+    size_t i = (size_t)(splitmix(key) & st->seen_mask);
+    while (st->seen[i] && st->seen[i] != key)
+        i = (i + 1) & st->seen_mask;
+    int was = st->seen[i] != 0;
+    st->seen[i] = key ? key : 1;
+    return was;
 }
 
 /* reclaim victim: policy-ordered evictable slot (busy slots rotated away).
@@ -812,6 +881,7 @@ void fatcat_stream_get_stats(const fatcat_stream *st, fatcat_stream_stats *out)
     out->wait_bytes = st->wait_bytes; out->cold_bytes = st->cold_bytes;
     out->ring_bytes = st->ring_bytes;
     out->ring_spec_bytes = st->ring_spec_bytes;
+    out->prefill_skips = st->prefill_skips;
     out->n_slots = st->n_slots; out->used_slots = st->used;
     out->slot_bytes = st->slot_bytes;
     pthread_mutex_unlock((pthread_mutex_t *)&st->mu);

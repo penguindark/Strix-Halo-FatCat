@@ -194,6 +194,13 @@ struct fatcat_ml4 {
                               * cost ~1 GB/token of NVMe (ring bytes were
                               * ~74% speculative at depth 4), so it is off
                               * by default; 1-2 may still help small tiers. */
+    float skip_tau;          /* H3 cache-aware tail-skip (FATCAT_SKIP, default
+                              * 0 = off): a routed expert that is NOT resident
+                              * in the warm tier and whose normalized weight is
+                              * below tau * w_top1 is dropped (no NVMe fetch),
+                              * remaining weights renormalized. Lossy by
+                              * design; validate quality before enabling. */
+    uint64_t skip_n, skip_w; /* experts dropped / sum(w*1000) of dropped */
     int pin_on;              /* D5f: pin hot per-token weights in RAM (FATCAT_PIN=0 off) */
     void **pins; size_t n_pins, pins_cap;   /* anonymous copies backing pinned weights */
     long pinned_mb;          /* total pinned bytes / MB (charged to the budget) */
@@ -718,6 +725,9 @@ fatcat_ml4 *fatcat_ml4_open(fatcat_gguf *g, char *errbuf, size_t errlen)
     { const char *sp = getenv("FATCAT_SPECP");      /* D5f spec-prefetch depth */
       m->specpf = sp ? atoi(sp) : 0;
       if (m->specpf < 0) m->specpf = 0; }   /* upper bound applied at call */
+    { const char *sk = getenv("FATCAT_SKIP");       /* H3 cache-aware skip */
+      m->skip_tau = sk ? (float)atof(sk) : 0.0f;
+      if (m->skip_tau < 0.0f) m->skip_tau = 0.0f; }
     { const char *pn = getenv("FATCAT_PIN");        /* D5f hot-weight pinning */
       if (pn) m->pin_on = atoi(pn) != 0;
       else m->pin_on = 0;   /* measured FLAT at 40 GB tier (refault theory
@@ -1028,6 +1038,12 @@ void fatcat_ml4_get_spec(const fatcat_ml4 *m, uint64_t *total, uint64_t *hit)
 {
     if (total) *total = m->spec_total;
     if (hit) *hit = m->spec_hit;
+}
+
+void fatcat_ml4_get_skip(const fatcat_ml4 *m, uint64_t *n, uint64_t *w)
+{
+    if (n) *n = m->skip_n;
+    if (w) *w = m->skip_w;
 }
 
 fatcat_ml4_info fatcat_ml4_get_info(const fatcat_ml4 *m) { return m->info; }
@@ -1969,10 +1985,14 @@ static int fatcat_ml4_forward_int(fatcat_ml4 *m, const uint32_t *tokens, size_t 
     }
 
     /* D1: batched prefill path (layer-outer, grouped expert loads) */
-    if (m->batch_n > 1 && n_tokens > 1 && !dump_fp)
-        return forward_batched(m, tokens, n_tokens, router_cb, cb_ctx,
-                               last_logits, row_logits, xn, out, q, q_abs, kv, acc, o,
-                               fa, fb, logits);
+    if (m->batch_n > 1 && n_tokens > 1 && !dump_fp) {
+        fatcat_stream_set_prefill(m->stream, 1);   /* H6 admission gate on */
+        int rcb = forward_batched(m, tokens, n_tokens, router_cb, cb_ctx,
+                                  last_logits, row_logits, xn, out, q, q_abs,
+                                  kv, acc, o, fa, fb, logits);
+        fatcat_stream_set_prefill(m->stream, 0);
+        return rcb;
+    }
 
     for (size_t t = 0; t < n_tokens; t++) {
         uint32_t tok = tokens[t];
@@ -2034,13 +2054,54 @@ static int fatcat_ml4_forward_int(fatcat_ml4 *m, const uint32_t *tokens, size_t 
                             if (ids[k] == prev_spec[j]) { m->spec_hit++; break; }
                 }
 
+                /* H3 cache-aware tail-skip: a cold expert whose normalized
+                 * weight is below tau * w_top1 costs a full NVMe fetch for a
+                 * marginal contribution -> drop it (no prefetch, no slice)
+                 * and renormalize the rest. Hits always run (zero I/O).
+                 * Decode path only (batched prefill skips this). */
+                uint32_t nk = topk;
+                if (m->skip_tau > 0.0f && m->stream && n_tokens == 1) {
+                    float w0 = wts[0];
+                    float kept = 0.0f;
+                    int drop[ML4_MAX_TOPK];
+                    for (uint32_t k = 0; k < topk; k++) {
+                        drop[k] = 0;
+                        if (k == 0 || wts[k] >= m->skip_tau * w0) { drop[k] = 0; }
+                        else {
+                            uint64_t base = (uint64_t)il * 3;
+                            int res = fatcat_stream_resident(m->stream,
+                                        (base + 0) * m->info.n_experts + ids[k] + 1)
+                                   && fatcat_stream_resident(m->stream,
+                                        (base + 1) * m->info.n_experts + ids[k] + 1)
+                                   && fatcat_stream_resident(m->stream,
+                                        (base + 2) * m->info.n_experts + ids[k] + 1);
+                            if (!res) {
+                                drop[k] = 1;
+                                m->skip_n++;
+                                m->skip_w += (uint64_t)(wts[k] * 1000.0f);
+                            }
+                        }
+                        if (!drop[k]) kept += wts[k];
+                    }
+                    if (m->skip_n && kept > 0.0f && kept < 1.0f) {
+                        uint32_t w_i = 0;
+                        for (uint32_t k = 0; k < topk; k++)
+                            if (!drop[k]) {
+                                ids[w_i] = ids[k];
+                                wts[w_i] = wts[k] / kept;
+                                w_i++;
+                            }
+                        nk = w_i;
+                    }
+                }
+
                 /* shared expert + routed experts */
                 /* P3 v2: issue this layer's expert reads NOW (async, via the
                  * stream fill worker) so NVMe streams while the shared-expert
                  * FFN computes below. The speculative next-layer set follows
                  * (lower priority: it must not delay the critical reads). */
                 if (m->stream)
-                    prefetch_experts(m, il, L, ids, topk, 0);
+                    prefetch_experts(m, il, L, ids, nk, 0);
                 if (m->prof) { double t1 = prof_now(); m->p_routed += t1 - t0; m->p_r_pre += t1 - t0; t0 = t1; }
                 ffn_par(m, &L->sh_gate, &L->sh_up, &L->sh_down, xn, fd, fa, fb, m->n_ff_exp);
                 for (int64_t i = 0; i < n_embd; i++) out[i] = fd[i];
@@ -2059,7 +2120,7 @@ static int fatcat_ml4_forward_int(fatcat_ml4 *m, const uint32_t *tokens, size_t 
                 /* stage xn once: all gate+up GEMVs of the layer share it */
                 const float *xn_dev = gpu_pipe
                     ? fatcat_gpu_xstage(xn, (size_t)n_embd * 4) : NULL;
-                for (uint32_t k = 0; k < topk; k++) {
+                for (uint32_t k = 0; k < nk; k++) {
                     const uint64_t base_tag = ((uint64_t)il << 34) | ids[k];
                     const char *g = expert_slice(m, &L->ex_gate, L->ex_gate_stride,
                                                  ids[k], (uint64_t)il * 3 + 0,
@@ -2079,7 +2140,7 @@ static int fatcat_ml4_forward_int(fatcat_ml4 *m, const uint32_t *tokens, size_t 
                 }
                 if (gpu_pipe) fatcat_gpu_wait();
                 if (m->prof) { double t1 = prof_now(); m->p_routed += t1 - t0; m->p_r_wait += t1 - t0; t0 = t1; }
-                for (uint32_t k = 0; k < topk; k++) {
+                for (uint32_t k = 0; k < nk; k++) {
                     float *fk = fa + (size_t)k * sz_big;
                     const float *gk = fb + (size_t)k * sz_big;
                     for (int64_t i = 0; i < (int64_t)m->n_ff_exp; i++)
@@ -2100,11 +2161,11 @@ static int fatcat_ml4_forward_int(fatcat_ml4 *m, const uint32_t *tokens, size_t 
                 }
                 if (gpu_pipe) fatcat_gpu_wait();
                 if (m->prof) { double t1 = prof_now(); m->p_routed += t1 - t0; m->p_r_wait += t1 - t0; t0 = t1; }
-                for (uint32_t k = 0; k < topk; k++) {
+                for (uint32_t k = 0; k < nk; k++) {
                     const float *ck = fc + (size_t)k * sz_big;
                     for (int64_t i = 0; i < n_embd; i++) out[i] += wts[k] * ck[i];
                 }
-                for (uint32_t k = 0; k < topk; k++)
+                for (uint32_t k = 0; k < nk; k++)
                     for (int t = 0; t < 3; t++)
                         if (ek[k][t])
                             fatcat_stream_release(m->stream, ek[k][t]);
