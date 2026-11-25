@@ -226,6 +226,23 @@ Full doctrine: `docs/performance.md`. Key numbers (4-bit weights):
   of ring NVMe bytes at depth 4), hot-weight pinning measured flat
   (`FATCAT_PIN=1` opt-in only). Decode-only stats window + per-process
   io probe (`decode nvme:` line) distinguish engine vs system bytes.
+- External optimization-proposal audit ✅ CLOSED (Sessions 43–43f): six
+  externally-proposed levers tested against measurements, five rejected
+  with data — H1 unified O_DIRECT pool (GGUF data_start is 32B-aligned:
+  O_DIRECT impossible; 94 GB tier math ignores GPU GTT, S42f), H2
+  multi-token spec-decode (oracle benchmark `--spec-oracle` +
+  `tools/spec-oracle.sh`: batched verify costs R(K)>K bytes AND time at
+  verify-sized chunks — no union reuse below ~256 tok chunks, S43b), H3
+  cache-aware cold-tail skip (FCTS v2 router weights + `tools/skip-sim.py`
+  on a real trace: <1% byte savings at any sane tau, `FATCAT_SKIP` stays
+  measurement-only, S43d), H4 per-expert GGUF repack (bandwidth-bound,
+  not queue-depth-bound — priority-queue A/B was flat), H5 GPU/IO overlap
+  (already implemented: union prefetch + async GEMV pipe). **H6 accepted
+  (S43e/f): prefill anti-thrash `FATCAT_NOPROMO=2` is the new DEFAULT —
+  prefill tier misses promote only on a 2nd reference within the same
+  prefill: decode +5.9%, prefill +9.0% in the standalone A/B.** Net of
+  the audit: ~+5% decode for free, and the speed story is CLOSED at the
+  64 GB tier — decode is NVMe-saturated; further gains need hardware.
 
 ### Next implementations (queued backlog, in priority order)
 
@@ -253,6 +270,13 @@ Full doctrine: `docs/performance.md`. Key numbers (4-bit weights):
 3. `tools/stream-sim` ✅ DONE (Session 33): trace-replay harness shipped;
    results in development_log Session 33. Remaining: record more/longer
    traces to harden the policy decision before flipping the default.
+4. Speed-work external audit ✅ CLOSED (Sessions 43–43f, see the audit
+   bullet above): H6 shipped as default; H1–H5 rejected/already-done with
+   data. Remaining optional speed items, in order: (a) confirm H6's +5.9%
+   with a second A/B or a long-prompt variant (variance caveat S43f);
+   (b) D4 stage 2 — indexer batching in the batched path (small, only if
+   prefill is ever made latency-critical). Everything else is at the
+   NVMe-bandwidth plateau: no software lever left at 64 GB.
 
 ## 6. Repository layout
 

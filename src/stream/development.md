@@ -97,3 +97,15 @@ run standalone. `logit-dump` prints peak RSS.
   `FATCAT_MEM_BUDGET_GB` hard cap — evicts resident slots (payload munmap'd)
   in policy order until used fits, skipping in-flight/pinned/referenced
   slots. ml4 calls it at KV growth to make room before realloc'ing the KV.
+
+## Prefill anti-thrash (Session 43e/f, H6)
+- `fatcat_stream_set_prefill(st, on)` marks the batched-prefill window
+  (ml4 wraps `forward_batched`). While set, tier misses follow
+  `FATCAT_NOPROMO`: 2 (default) = admit only on a 2nd reference within
+  the same prefill (64k-entry seen table, cleared per prefill); 1 = never
+  admit (caller uses its mmap view); 0 = off (prefill admits like decode).
+- Rationale: prefill touches a mass of one-shot experts that evict the
+  decode-hot Zipfian core. Standalone A/B (S43f): policy 2 won on both
+  axes — decode +5.9%, prefill +9.0% — because fewer one-shot promotions
+  also spare the experts prefill itself reuses across chunks. Policy 1 is
+  strictly worse than 2 (prefill does reuse its own experts).

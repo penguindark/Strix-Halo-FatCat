@@ -131,6 +131,7 @@ across commands — see the header of `tools/fatcat-run.c`.
 | `FATCAT_KV_HUGEPAGE` | `1` | transparent hugepages on KV/indexer caches |
 | `FATCAT_IDX` | `1` | DSA sparse attention (keeps decode flat as context grows) |
 | `FATCAT_SPECP` | `0` (default) | speculative expert prefetch: costs ~1 GB/token of NVMe, off |
+| `FATCAT_NOPROMO` | `2` (default) | prefill anti-thrash: prompt experts join the warm tier only on a 2nd reference (+6% decode, +9% prefill measured) |
 | `FATCAT_PROF` | `1` for runs | per-phase timing breakdown on stderr |
 
 - The budget counts tier + KV + reserve only. On Strix Halo `hipMalloc`

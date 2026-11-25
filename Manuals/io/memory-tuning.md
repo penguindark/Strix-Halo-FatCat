@@ -76,7 +76,12 @@ FATCAT_WARM_MB=86016 FATCAT_MEM_LIMIT_MB=110000
   (`FATCAT_SPECP=0`): at 64 GB it was speed-neutral and cost ~1 GB/token
   of NVMe bandwidth the critical reads need. `FATCAT_PIN=1` (pin ~16 GB
   hot weights to anonymous RAM) measured flat - leave off unless NVMe
-  refaults ever dominate.
+  refaults ever dominate. Prefill anti-thrash is ON by default
+  (`FATCAT_NOPROMO=2`, Session 43f): prefill cache misses enter the warm
+  tier only on a 2nd reference within the same prefill, so one-shot
+  prompt experts stop evicting decode-hot experts - A/B: decode +5.9%,
+  prefill +9.0%. `FATCAT_NOPROMO=0` restores the old promote-everything
+  behavior; `=1` (never promote) is worse than 2 on both phases.
 
 - `FATCAT_WARM_MB=65536`: with the assistant gone, cache ~64 GB of experts
   (model is 218 GB on disk, so this is the single biggest prefill lever:
