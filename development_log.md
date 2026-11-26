@@ -1863,3 +1863,59 @@ proven to be llama.cpp's lossy fast kernels, not a fatcat error.
   (expert-spec guesses 65.3% used). Pista B (prefetch earlier/deeper)
   is the next lever; "NVMe-saturated, needs hardware" from S43f is
   RETRACTED — there is ~1.2 GB/s of drive headroom to exploit.
+
+## 2026-11-26 — Session 45: Pista B — early speculative expert prefetch
+
+- Code study: the next-layer router guess is computed right after each
+  attention (FATCAT_SPEC=1, always on, accuracy 65.3% measured), but the
+  speculative PREFETCH was off by default (FATCAT_SPECP=0, decided in the
+  readahead era when bandwidth looked scarce) and, when on, was issued
+  at END-of-layer (lead time = next attention only). Every tier miss
+  stalls the producer (late-prefetch == miss): the decode lever is
+  prefetch LEAD TIME, not bandwidth (Pista A proved ~1.2 GB/s headroom).
+- Changes: (1) FATCAT_SPECE=1 (new default): issue the spec prefetch at
+  the guess point -> lead time = this layer's FFN+GEMVs + next
+  attention; legacy end-of-layer issue kept as FATCAT_SPECE=0.
+  (2) stream worker caps speculative fills to 8 per batch (critical
+  uncapped, merged critical-first): an early-issued deep guess can never
+  delay a critical read by more than ~8 slice reads.
+- Default behavior unchanged (SPECP=0 -> depth 0). A/B pending on GPU:
+  SPECP=4 (early) vs SPECP=4 SPECE=0 (late) vs control SPECP=0
+  (already measured: 122.31 GB device, 0.86 tok/s).
+
+## 2026-11-26 — Session 45b: Pista B A/B — speculation ON +14%, late issue beats early
+
+- Standalone GPU A/B (48 tok, 64 GB tier; control SPECP=0: 122.31 GB,
+  0.86 tok/s):
+  * SPECP=4 EARLY (issue at guess): ring 178.51 GB (spec 130.06),
+    miss 50.26 GB, decode 0.90 tok/s (+4.7%), prefill 2.84.
+  * SPECP=4 LATE (end-of-layer): ring 178.42 GB (spec 130.06),
+    miss 66.04 GB, decode 0.98 tok/s (+14.0%), prefill 2.55.
+- Counter-intuitive but structural: EARLY issue queues the guess BEFORE
+  the current layer's critical reads; an idle worker starts a spec batch
+  (cap 8 ~= 19 ms) and the critical reads that arrive behind it stall the
+  GEMV pipeline every layer. LATE issue rides the guess behind critical
+  in the same worker cycle: spec fills land during this layer's GEMVs,
+  exactly when the next layer will need them. spec_early default flipped
+  to 0 (FATCAT_SPECE=1 kept as A/B knob). Spec batch cap kept: it bounds
+  the late-path worst case too.
+- Cost: +56 GB ring per 48-tok window (~+1.17 GB/tok, 73% of ring is
+  speculative) for +14% decode; device 3.62 GB/s still under the ~4.6
+  measured ceiling. Default SPECP flip pending a confirmation re-run +
+  SPECP=2 probe (half the bytes, maybe most of the gain).
+
+## 2026-11-26 — Session 45c: Pista B CLOSED — FATCAT_SPECP=2 is the new default
+
+- Confirmation runs (48 tok, 64 GB tier, late issue):
+  * SPECP=4: decode 0.99 tok/s (replicates 0.98), ring 178.4 GB.
+  * SPECP=2: decode 1.02 tok/s (+18.6% vs 0.86 control), ring 136.0 GB
+    (spec 55.6 GB), device 2.89 GB/s — comfortable margin under the
+    ~4.6 GB/s ceiling.
+- Depth 2 BEATS depth 4 on speed AND costs 24% fewer bytes: deeper
+  guesses pollute the tier (S3-FIFO demotion lag) and the marginal
+  guess accuracy (65.3% top-4) does not pay for the interference.
+- Default flipped: FATCAT_SPECP default 0 -> 2. README + project.md
+  updated. Combined with Pista A (-34% dead device bytes) and H6, the
+  474-tok standalone benchmark decode moved 0.86 -> 1.02 tok/s (+19%)
+  this week; the "speed CLOSED, needs hardware" verdict from S43f is
+  formally retracted — two software levers were still on the table.

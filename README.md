@@ -130,7 +130,7 @@ across commands — see the header of `tools/fatcat-run.c`.
 | `FATCAT_KV_TARGET` | per use | pre-allocated KV tokens (chat: `--ctx` sets it) |
 | `FATCAT_KV_HUGEPAGE` | `1` | transparent hugepages on KV/indexer caches |
 | `FATCAT_IDX` | `1` | DSA sparse attention (keeps decode flat as context grows) |
-| `FATCAT_SPECP` | `0` (default) | speculative expert prefetch: costs ~1 GB/token of NVMe, off |
+| `FATCAT_SPECP` | `2` (default) | speculative expert prefetch depth: next-layer experts guessed from the current router (+19% decode for +14% NVMe bytes; `0` off, `4` measured slower — tier pollution) |
 | `FATCAT_NOPROMO` | `2` (default) | prefill anti-thrash: prompt experts join the warm tier only on a 2nd reference (+6% decode, +9% prefill measured) |
 | `FATCAT_RAND` | `1` (default) | stream reads use a `POSIX_FADV_RANDOM` fd: kills kernel readahead waste on random expert slices (−34% device bytes on this box; `0` restores readahead) |
 | `FATCAT_PROF` | `1` for runs | per-phase timing breakdown on stderr |

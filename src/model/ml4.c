@@ -189,11 +189,13 @@ struct fatcat_ml4 {
                               * 2 = GPU + CPU cross-check for validation) */
     int odirect;             /* D5f: O_DIRECT stream fills (FATCAT_ODIRECT=0 off) */
     int specpf;              /* D5f: speculative expert prefetch depth (top-k by
-                              * router weight; FATCAT_SPECP, default 0). At
-                              * 64 GB tiers speculation was speed-neutral and
-                              * cost ~1 GB/token of NVMe (ring bytes were
-                              * ~74% speculative at depth 4), so it is off
-                              * by default; 1-2 may still help small tiers. */
+                              * router weight; FATCAT_SPECP, default 2 since
+                              * Pista B S45c: +18.6% decode at the 64 GB tier
+                              * for +14% ring bytes; depth 4 costs more bytes
+                              * and measures slower; 0 = off). */
+    int spec_early;          /* Pista B A/B knob: 1 = issue the next-layer
+                              * spec prefetch at the guess point; default 0
+                              * = end-of-layer (rides behind critical). */
     float skip_tau;          /* H3 cache-aware tail-skip (FATCAT_SKIP, default
                               * 0 = off): a routed expert that is NOT resident
                               * in the warm tier and whose normalized weight is
@@ -731,9 +733,23 @@ fatcat_ml4 *fatcat_ml4_open(fatcat_gguf *g, char *errbuf, size_t errlen)
       m->gpu_att = ga ? atoi(ga) : 1; }
     { const char *od = getenv("FATCAT_ODIRECT");    /* D5f page-cache bypass */
       m->odirect = od ? atoi(od) != 0 : 1; }
-    { const char *sp = getenv("FATCAT_SPECP");      /* D5f spec-prefetch depth */
-      m->specpf = sp ? atoi(sp) : 0;
+    { const char *sp = getenv("FATCAT_SPECP");      /* D5f spec-prefetch depth;
+                              * Pista B (S45c): default 2 — measured +18.6%
+                              * decode at 64 GB tier for +14% ring bytes.
+                              * Depth 4 costs 30% more bytes and is SLOWER
+                              * (deeper guesses pollute the tier); 0 = off. */
+      m->specpf = sp ? atoi(sp) : 2;
       if (m->specpf < 0) m->specpf = 0; }   /* upper bound applied at call */
+    { const char *se = getenv("FATCAT_SPECE");     /* Pista B A/B knob:
+                                                   * 1 = issue spec at the
+                                                   * guess point; default 0
+                                                   * = end-of-layer issue
+                                                   * (rides behind this
+                                                   * layer's critical reads
+                                                   * in the worker queue:
+                                                   * early issue measured
+                                                   * SLOWER, S45b) */
+      m->spec_early = se ? atoi(se) != 0 : 0; }
     { const char *sk = getenv("FATCAT_SKIP");       /* H3 cache-aware skip */
       m->skip_tau = sk ? (float)atof(sk) : 0.0f;
       if (m->skip_tau < 0.0f) m->skip_tau = 0.0f; }
@@ -2054,6 +2070,15 @@ static int fatcat_ml4_forward_int(fatcat_ml4 *m, const uint32_t *tokens, size_t 
                 rmsnorm(x, m->layers[il + 1].norm_ffn, m->eps, xn, n_embd);
                 cur_spec_n = (int)router_topk(m, m->layers[il + 1].router,
                                               xn, logits, cur_spec, NULL);
+                /* Pista B: issue the guess NOW (right after attention)
+                 * instead of at end-of-layer: lead time becomes this
+                 * layer's FFN+GEMVs + next attention, not just the next
+                 * attention. The worker's spec batch cap keeps critical
+                 * reads ahead of the guess work. */
+                if (m->spec_early && cur_spec_n > 0)
+                    prefetch_experts(m, il + 1, &m->layers[il + 1], cur_spec,
+                                     (uint32_t)(cur_spec_n < m->specpf
+                                                 ? cur_spec_n : m->specpf), 1);
             }
             if (m->prof) { double t1 = prof_now(); m->p_router += t1 - t0; t0 = t1; }
 
@@ -2198,8 +2223,9 @@ static int fatcat_ml4_forward_int(fatcat_ml4 *m, const uint32_t *tokens, size_t 
             /* issue speculative next-layer prefetch AFTER this layer's
              * critical-path reads (lower priority), then rotate the guess
              * so the next layer can score it. Works for dense layers too
-             * (covers the dense->MoE boundary). */
-            if (m->stream && cur_spec_n > 0)
+             * (covers the dense->MoE boundary). Legacy position; with
+             * FATCAT_SPECE=1 the prefetch was already issued at the guess. */
+            if (m->stream && cur_spec_n > 0 && !m->spec_early)
                 prefetch_experts(m, il + 1, &m->layers[il + 1], cur_spec,
                                  (uint32_t)(cur_spec_n < m->specpf
                                              ? cur_spec_n : m->specpf), 1);

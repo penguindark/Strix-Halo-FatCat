@@ -74,6 +74,10 @@ typedef struct fillreq {
 /* queue classes: critical (this layer's routed experts) always drain before
  * speculative (next-layer guesses: ~30% wrong, must not delay real reads) */
 #define FQ_N 2
+/* Pista B: max speculative fills per worker batch (critical is uncapped).
+ * Bounds the worst-case delay a late-arriving critical read sees behind
+ * an in-flight all-spec batch to ~8 slice reads. */
+#define FQ_SPEC_BATCH 8
 
 struct fatcat_stream {
     slot_t  *slots;
@@ -460,10 +464,18 @@ static void *fill_worker(void *arg)
                 free(r);
                 continue;
             }
-            /* ring path: batch up to ring depth, submit, reap all */
+            /* ring path: batch up to ring depth, submit, reap all.
+             * Pista B: speculative requests are capped per batch so a
+             * deep early-issued guess set can never delay a critical
+             * read that arrives while we reap (merged list is critical-
+             * first, so once spec starts, only spec follows). */
             fillreq *batch[64];
             int n = 0, accepted = 0;
-            while (q && n < 64) { batch[n++] = q; q = q->next; }
+            int spec_n = 0;
+            while (q && n < 64 && !(spec_n >= FQ_SPEC_BATCH && q->spec)) {
+                if (q->spec) spec_n++;
+                batch[n++] = q; q = q->next;
+            }
             fillreq *after = q;               /* first request not in batch */
             for (int i = 0; i < n; i++) {
                 fillreq *rq = batch[i];

@@ -256,6 +256,14 @@ Full doctrine: `docs/performance.md`. Key numbers (4-bit weights):
   every tier miss (`late-prefetch == miss` in the stats) stalls the
   producer waiting for its fill. Next lever: Pista B (earlier/deeper
   expert prefetch coverage).
+- Pista B — speculative expert prefetch ✅ ACCEPTED (Sessions 45–45c):
+  the next-layer router guess (65% accurate) now PREFETCHES by default,
+  issued end-of-layer so it rides behind the current critical reads and
+  lands during the GEMVs (`FATCAT_SPECE=1` early-issue variant measured
+  slower — guesses must never queue ahead of critical). New default
+  `FATCAT_SPECP=2`: standalone A/B +18.6% decode (0.86 -> 1.02 tok/s on
+  the 474-tok benchmark) for +14% ring bytes; depth 4 costs 30% more
+  bytes and measures slower (tier pollution from wrong guesses).
 
 ### Next implementations (queued backlog, in priority order)
 
