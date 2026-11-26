@@ -52,6 +52,7 @@ struct fatcat_engine {
     /* decode-window I/O probe: /proc/diskstats whole-disk sectors read,
      * sampled around the decode loop (ground truth NVMe throughput) */
     uint64_t io_sectors0;
+    uint64_t io_majflt0, io_majflt;
     double io_t0;
     uint64_t io_bytes;
     uint64_t io_self0, io_self;
@@ -111,6 +112,30 @@ static uint64_t self_io_read_bytes(void)
             break;
     fclose(f);
     return v;
+}
+
+/* Major faults = pages read FROM THE DEVICE outside read()/io_uring syscalls
+ * (mmap page-cache refaults). The discriminator for the non-ring device
+ * bytes: ring bytes + majflt*4KB should account for all device reads. */
+static uint64_t self_majflt(void)
+{
+    FILE *f = fopen("/proc/self/stat", "r");
+    if (!f) return 0;
+    char buf[2048];
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    /* field 12 (majflt) after the comm field: parse past the last ')' */
+    char *p = strrchr(buf, ')');
+    if (!p) return 0;
+    /* Empirically verified on this kernel (getrusage cross-check): after
+     * comm, minflt is the 8th token and majflt the 9th. */
+    unsigned long long minflt = 0, majflt = 0; (void)minflt;
+    int got = sscanf(p + 2, "%*c %*d %*d %*d %*d %*d %llu %llu",
+                     &minflt, &majflt);
+    if (got == 2)
+        return majflt;
+    return 0;
 }
 
 static double now_s(void)
@@ -514,6 +539,14 @@ void fatcat_engine_skip_stats(const fatcat_engine *e, uint64_t *n, uint64_t *w)
     fatcat_ml4_get_skip(e->m, n, w);
 }
 
+/* Pista A staging counters (see fatcat_ml4_get_stage). */
+void fatcat_engine_stage_stats(const fatcat_engine *e, uint64_t *slice_n,
+                               uint64_t *slice_bytes, uint64_t *stage_n,
+                               uint64_t *stage_bytes)
+{
+    fatcat_ml4_get_stage(e->m, slice_n, slice_bytes, stage_n, stage_bytes);
+}
+
 /* decode-window block-device reads (bytes, seconds) — ground-truth NVMe */
 void fatcat_engine_io_stats(const fatcat_engine *e, uint64_t *bytes,
                             double *secs, uint64_t *self_bytes)
@@ -521,6 +554,11 @@ void fatcat_engine_io_stats(const fatcat_engine *e, uint64_t *bytes,
     if (bytes) *bytes = e->io_bytes;
     if (secs) *secs = e->io_secs;
     if (self_bytes) *self_bytes = e->io_self;
+}
+
+uint64_t fatcat_engine_majflt_bytes(const fatcat_engine *e)
+{
+    return e ? e->io_majflt : 0;
 }
 
 int fatcat_engine_generate(fatcat_engine *e, const uint32_t *prompt, size_t n_prompt,
@@ -538,6 +576,7 @@ int fatcat_engine_generate(fatcat_engine *e, const uint32_t *prompt, size_t n_pr
     fatcat_stream_reset_stats(fatcat_ml4_stream(e->m));
     e->io_sectors0 = diskstats_sectors();
     e->io_self0 = self_io_read_bytes();
+    e->io_majflt0 = self_majflt();
     e->io_t0 = now_s();
 
     uint32_t cur = prompt[n_prompt - 1];
@@ -549,6 +588,7 @@ int fatcat_engine_generate(fatcat_engine *e, const uint32_t *prompt, size_t n_pr
     }
     e->io_bytes = (diskstats_sectors() - e->io_sectors0) * 512ull;
     e->io_self = self_io_read_bytes() - e->io_self0;
+    e->io_majflt = (self_majflt() - e->io_majflt0) * 4096ull;
     e->io_secs = now_s() - e->io_t0;
     fatcat_engine_flush(e);   /* n_new cutoff: drop unemitted speculation */
     return 0;

@@ -117,4 +117,11 @@ void fatcat_ml4_get_spec(const fatcat_ml4 *m, uint64_t *total, uint64_t *hit);
  * weights scaled by 1000 (quality accounting). */
 void fatcat_ml4_get_skip(const fatcat_ml4 *m, uint64_t *n, uint64_t *w);
 
+/* Pista A counters: expert slices served from the mmap view because the
+ * warm tier could not serve them, and bytes staged (hipMemcpy'd) into GPU
+ * staging slots. Both mark double NVMe reads (ring fill + page re-fault). */
+void fatcat_ml4_get_stage(const fatcat_ml4 *m, uint64_t *slice_n,
+                          uint64_t *slice_bytes, uint64_t *stage_n,
+                          uint64_t *stage_bytes);
+
 #endif /* FATCAT_ML4_H */

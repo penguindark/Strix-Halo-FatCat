@@ -103,10 +103,20 @@ void fatcat_engine_espec_stats(const fatcat_engine *e, uint64_t *total,
 /* H3 cache-aware tail-skip counters: experts dropped, dropped weight x1000 */
 void fatcat_engine_skip_stats(const fatcat_engine *e, uint64_t *n, uint64_t *w);
 
+/* Pista A staging counters: mmap-fallback slices (n, bytes) and GPU-staged
+ * bytes (n, bytes). Non-zero stage bytes = double NVMe reads to attack. */
+void fatcat_engine_stage_stats(const fatcat_engine *e, uint64_t *slice_n,
+                               uint64_t *slice_bytes, uint64_t *stage_n,
+                               uint64_t *stage_bytes);
+
 /* decode-window block-device reads (bytes, seconds) — ground-truth NVMe.
  * self_bytes: device reads by this process only (rest is system noise). */
 void fatcat_engine_io_stats(const fatcat_engine *e, uint64_t *bytes,
                             double *secs, uint64_t *self_bytes);
+
+/* Decode-window mmap major-fault bytes (page refaults from device, the
+ * non-ring reader suspect: hot GGUF pages evicted then re-read by the GPU). */
+uint64_t fatcat_engine_majflt_bytes(const fatcat_engine *e);
 
 /* Discard accepted-but-unemitted speculative tokens (call when a
  * generation run stops early, e.g. on EOS). */

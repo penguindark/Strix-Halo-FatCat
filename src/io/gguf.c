@@ -34,6 +34,11 @@ typedef struct gguf_part {
     char *path;
     int fd;
     int fd_direct;        /* O_RDONLY|O_DIRECT, lazily opened (-1 if failed) */
+    int fd_stream;        /* O_RDONLY + POSIX_FADV_RANDOM for the stream
+                           * ring: this box runs NVMe read_ahead_kb=4096, so
+                           * buffered random reads drag 4 MB of dead bytes
+                           * per slice (Pista A: 63 GB/tok-window). Lazily
+                           * opened (-1 if failed or FATCAT_RAND=0). */
     void *map;
     size_t size;
     uint64_t data_start;  /* absolute offset of tensor data within this part */
@@ -90,9 +95,16 @@ bool fatcat_gguf_resolve(const fatcat_gguf *g, const void *mapped,
                          int *fd, uint64_t *file_off)
 {
     uint64_t off = 0;
-    const gguf_part *pt = find_part_at(g, mapped, &off);
+    gguf_part *pt = (gguf_part *)find_part_at(g, mapped, &off);
     if (!pt || pt->fd < 0) return false;
-    *fd = pt->fd;
+    if (pt->fd_stream == 0) {         /* not yet attempted */
+        const char *r = getenv("FATCAT_RAND");   /* FATCAT_RAND=0 keeps ra */
+        int f = open(pt->path, O_RDONLY);
+        if (f >= 0 && (!r || atoi(r) != 0))
+            posix_fadvise(f, 0, 0, POSIX_FADV_RANDOM);
+        pt->fd_stream = f >= 0 ? f : -1;
+    }
+    *fd = pt->fd_stream >= 0 ? pt->fd_stream : pt->fd;
     *file_off = off;
     return true;
 }

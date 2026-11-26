@@ -132,6 +132,7 @@ across commands — see the header of `tools/fatcat-run.c`.
 | `FATCAT_IDX` | `1` | DSA sparse attention (keeps decode flat as context grows) |
 | `FATCAT_SPECP` | `0` (default) | speculative expert prefetch: costs ~1 GB/token of NVMe, off |
 | `FATCAT_NOPROMO` | `2` (default) | prefill anti-thrash: prompt experts join the warm tier only on a 2nd reference (+6% decode, +9% prefill measured) |
+| `FATCAT_RAND` | `1` (default) | stream reads use a `POSIX_FADV_RANDOM` fd: kills kernel readahead waste on random expert slices (−34% device bytes on this box; `0` restores readahead) |
 | `FATCAT_PROF` | `1` for runs | per-phase timing breakdown on stderr |
 
 - The budget counts tier + KV + reserve only. On Strix Halo `hipMalloc`

@@ -1728,3 +1728,138 @@ proven to be llama.cpp's lossy fast kernels, not a fatcat error.
   Default flipped to 2 (FATCAT_NOPROMO=0 restores old behavior).
 - Speed-work scoreboard FINAL: H6 accepted (+~4-6%), H1/H3/H4 rejected,
   H2 rejected, H5 already done. 64 GB tier stays the operating point.
+
+## 2026-11-26 — Session 43g: static expert pruning (H7) — shelved, curve documented
+
+- User proposal H7: profile the router (ml4 router_topk = softmax over 128
+  experts/layer) offline, fix a static admit-list; low-weight experts are
+  never loaded, never cached, their contribution dropped (weights
+  renormalized). Static sibling of H3.
+- Measured offline on the real 537-tok FCTS v2 trace (weights): keep-set
+  size vs retained router mass per layer:
+    keep 16 -> 55.5% | 23 -> 64.7% | 41 (~tier capacity: 64 GB / 71 MoE
+    layers / 23.5 MB = ~41 experts/layer) -> ~80% | 64 -> 90.9% |
+    96 -> 98.3% | 128 -> 100%.
+- Verdict: routing mass is NOT compressible (S42c flatness from a new
+  angle). Staying under ~2% mass loss needs ~96/128 experts = ~160 GB
+  tier (2.5x available); at the 41/layer the tier can hold anyway, ~20%
+  of FFN mass per token would be dropped - grossly visible on IQ1_S.
+  And a static list can at best match what S3-FIFO already does
+  dynamically (it selects the hot set per-interval, not on average).
+- The only version that could work is model-side pruning WITH retraining
+  (out of scope for an inference engine). SHELVED, not rejected outright:
+  revisit if a smaller/pruned Mistral-Large-4 variant ever ships.
+
+## 2026-11-26 — Session 44: Pista A investigation begins (staging audit counters)
+
+- Literature sweep (SP-MoE 2510.10302, MoE-Lightning, AdapMoE, Specter,
+  llama.cpp RFC #28248): most external ideas already tested/done here;
+  RFC #28248 independently found our H6 prefill-thrash issue (+84% decode
+  for them). New attackable lead = the D5f "mystery remainder": ~1.18
+  GB/tok non-ring device reads attributed to GPU-side staging.
+- Mechanism hypothesis: gemv_expert ladder = tier zero-copy (0 bytes) ->
+  stage() fallback hipMemcpy from the GGUF mmap view -> CPU. expert_slice
+  silently falls back to mmap when fatcat_stream_get returns NULL (no
+  evictable slot / fill failure). Since D5f-2 fadvise(DONTNEED)s the page
+  right after the ring fill, a staged read of those pages RE-READS NVMe:
+  same bytes twice (ring + page fault). 88 layers x 4 experts x 3 slices
+  x ~1 MB ~= 1.05-1.2 GB/tok == the mystery remainder.
+- Instrumented (this commit): ml4 counters slice_mmap_n/bytes (tier could
+  not serve -> mmap fallback) + stage_n/bytes (hipMemcpy'd into GPU slots)
+  -> fatcat_engine_stage_stats -> "staging audit:" line in fatcat-run
+  (also prints fatcat_gpu_stats copies/stage-hits). CPU smoke: counters
+  live (10767 fallback slices at 1 GB tier, 0 GPU stage as expected).
+- GPU verdict run pending: if gpu-stage bytes ~= 1.2 GB/tok the double-read
+  is real -> fix candidates: (a) never fall back: wait for a slot instead
+  of returning NULL when all slots busy; (b) skip fadvise for slices the
+  GPU will stage; (c) enlarge staging slot ring. If ~0, mystery is
+  elsewhere (re-open probe).
+
+## 2026-11-26 — Session 44b: Pista A audit — staging theory DEAD, new suspect
+
+- GPU audit run (48 tok, 64 GB tier): mmap-fallback 0, gpu-stage 0,
+  gpu-copies 567/15.72 GB (resident uploads). The stage() double-read
+  hypothesis is FALSE: the tier serves every decode slice.
+- Reframed the mystery: ring submitted 122.42 GB but device did 191.14 GB
+  in the decode window -> 68.7 GB (1.43 GB/tok) read OUTSIDE read()/
+  io_uring accounting. Only mechanism left: mmap page REFaults (kernel
+  reads pages for the GPU's zero-copy reads of the resident GGUF mmap
+  views: attn/shared/dense/router weights, ~17 GB hot set squeezed out by
+  the 65.5 GB pinned tier + KV + GTT). Matches D5f's 1.34 GB/tok.
+- Added discriminator: decode-window majflt counter ("decode majflt:"
+  line, /proc/self/stat field 12 x 4KB). If majflt ~= non-ring bytes,
+  refault confirmed -> fix = pin the hot mmap set (FATCAT_PIN redux at 64
+  GB, now with the staging audit to prove it) or madvise(WILL_NEED) the
+  hot ranges. If majflt ~= 0, the reader is elsewhere (drive readahead?).
+
+## 2026-11-26 — Session 44c: majflt parser was broken; refault suspect revived
+
+- The "decode majflt: 0.00" verdict was a PARSER BUG: this kernel's
+  /proc/<pid>/stat token order after comm does not match the proc(5) man
+  page (verified empirically with getrusage(2) as ground truth: minflt is
+  the 8th token after ')', majflt the 9th; man-page order reads a
+  different field entirely). Fixed + validated: CPU smoke now reports
+  0.75 GB decode-window refaults (plausible for the 1 GB-tier mmap
+  fallback path).
+- Also parsed the GGUF shards: expert tensors are stacked [6144,6144,128]
+  IQ1_S/IQ2_XXS (~10 MB/expert slice); most tensor offsets are NOT
+  512-aligned -> O_DIRECT stream path is mostly inactive (buffered reads
+  + fadvise). Readahead math: ~10 MB random reads drag <=128 KB extra
+  each -> readahead cannot explain the 68 GB non-ring remainder.
+- Remaining suspects for the 1.41 GB/tok non-ring reader: (a) mmap
+  refaults (now measurable with the FIXED parser), (b) unknown read site.
+  Re-run the GPU audit: if majflt ~= non-ring bytes, refault confirmed.
+
+## 2026-11-26 — Session 44d: refault DEAD (fixed parser); per-thread io sampler
+
+- Re-run with FIXED majflt parser: decode-window refaults = 0.01 GB.
+  mmap refault hypothesis is dead: the 68 GB non-ring reads are NOT page
+  refaults, NOT staging, NOT sync-fills, NOT the pread fallback (ring
+  alive), NOT gguf_pread (no callers) -> yet /proc/self/io read_bytes ==
+  diskstats == 190 GB, i.e. charged to OUR process. Accounting paradox:
+  ring submitted 122 GB; 68 GB came from read-family activity we cannot
+  point at in code.
+- New tool tools/io_sampler.py: per-task (pid+tid) read_bytes deltas for
+  the WHOLE system during the run (validated: attributes 6 GB/s dd to
+  its thread). Discriminates: fatcat threads (hidden read site),
+  iou-wrk-* (io_uring io-wq accounting: ring bytes charged to worker,
+  ring_bytes vs read_bytes measure different tasks), kworker (kernel
+  reader: reclaim/readahead oddity).
+
+## 2026-11-26 — Session 44e: PISTA A SOLVED — 4 MB kernel readahead was the sink
+
+- io_sampler.py verdict: ONE thread (the fill worker) does ALL device
+  reads at 3.4 GB/s; no iou-wrk, no kworker. So the non-ring bytes were
+  ring reads amplified kernel-side.
+- Root cause: /sys/block/nvme0n1/queue/read_ahead_kb = 4096 (4 MB, not
+  the 128 KB default). Ring slices (~7.8 MB avg) are random offsets on a
+  buffered fd (tensor offsets mostly not 512-aligned -> O_DIRECT off),
+  so the kernel drags up to 4 MB of readahead after EVERY read:
+  122.42 GB / ~7.8 MB ~= 15.7k reads x 4 MB ~= 62.8 GB == the observed
+  62.9 GB non-ring remainder EXACTLY (and D5f's 1.18-1.34 GB/tok).
+  The readahead is pure waste: adjacent file bytes belong to experts
+  that are not routed next, and fadvise(DONTNEED) only covers the slice.
+- Fix: fatcat_gguf_resolve() now hands the stream a dedicated fd opened
+  with POSIX_FADV_RANDOM (fd_stream, lazily opened per part; mmap keeps
+  default readahead so model load stays fast; O_DIRECT path unaffected).
+  FATCAT_RAND=0 restores old behaviour for A/B. CPU smoke: non-ring
+  device bytes fell 15.77 -> 5.00 GB; test_stream ALL PASS.
+- Expected GPU effect: decode-window device reads 185 -> ~123 GB (-34%);
+  NVMe was the bottleneck (3.4 GB/s saturated) -> decode up ~+30%.
+
+## 2026-11-26 — Session 44f: Pista A fix validated — accounting perfect, decode unchanged
+
+- FADV_RANDOM stream fd A/B (same 48-tok standalone GPU recipe):
+  decode-window device reads 185.32 -> 122.31 GB (ring declared 122.42:
+  accounting now closes to 0.1%). NVMe 3.34 -> 2.19 GB/s. Prefill 2.76
+  tok/s (>= control). Decode 0.86 vs 0.87 tok/s: UNCHANGED.
+- Honest conclusion: the 63 GB/tok-window of readahead was REAL waste
+  (device wear, RAM pressure, prefill tax) but NOT the decode limiter.
+  The drive had headroom; demand was stall-limited, not bandwidth-
+  limited: late-prefetch == miss bytes means EVERY tier miss blocked
+  the producer on its fill. Decode time == ring delivery time only
+  because reads are issued on-demand, serial behind stalls.
+- Reframes the speed story: bottleneck = prefetch lead-time/coverage
+  (expert-spec guesses 65.3% used). Pista B (prefetch earlier/deeper)
+  is the next lever; "NVMe-saturated, needs hardware" from S43f is
+  RETRACTED — there is ~1.2 GB/s of drive headroom to exploit.

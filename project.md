@@ -241,8 +241,21 @@ Full doctrine: `docs/performance.md`. Key numbers (4-bit weights):
   (S43e/f): prefill anti-thrash `FATCAT_NOPROMO=2` is the new DEFAULT —
   prefill tier misses promote only on a 2nd reference within the same
   prefill: decode +5.9%, prefill +9.0% in the standalone A/B.** Net of
-  the audit: ~+5% decode for free, and the speed story is CLOSED at the
-  64 GB tier — decode is NVMe-saturated; further gains need hardware.
+  the audit: ~+5% decode for free.
+- Pista A — the 1.2 GB/tok "non-ring" device-read mystery ✅ SOLVED
+  (Session 44): NOT staging double-reads, NOT mmap refaults (majflt
+  counter added, ~0), NOT a hidden read site (`tools/io_sampler.py`
+  attributes every byte per-thread: the fill worker alone reads at line
+  rate). Root cause: this box runs `read_ahead_kb=4096`, so the kernel
+  dragged up to 4 MB of dead bytes after every random ~8 MB ring read
+  (15.7k reads/tok-window x 4 MB == the 63 GB remainder exactly). Fix:
+  the stream ring now reads through a dedicated `POSIX_FADV_RANDOM` fd
+  (`FATCAT_RAND=0` restores); device bytes now match ring bytes to 0.1%.
+  Decode speed UNCHANGED (0.86 vs 0.87 tok/s): the NVMe had headroom all
+  along — the real decode limiter is PREFETCH LATENCY, not bandwidth:
+  every tier miss (`late-prefetch == miss` in the stats) stalls the
+  producer waiting for its fill. Next lever: Pista B (earlier/deeper
+  expert prefetch coverage).
 
 ### Next implementations (queued backlog, in priority order)
 

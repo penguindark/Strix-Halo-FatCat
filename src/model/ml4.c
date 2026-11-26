@@ -201,6 +201,14 @@ struct fatcat_ml4 {
                               * remaining weights renormalized. Lossy by
                               * design; validate quality before enabling. */
     uint64_t skip_n, skip_w; /* experts dropped / sum(w*1000) of dropped */
+    /* Pista A counters: bytes served through the expensive paths of the
+     * gemv ladder. slice_mmap_bytes = expert slices served from the GGUF
+     * mmap view because the warm tier could not serve them (get NULL);
+     * stage_bytes = bytes hipMemcpy'd into GPU staging slots (each one is
+     * a DOUBLE NVMe read: ring fill + page re-fault when the mmap pages
+     * were fadvise-dropped). Watch these in the decode window. */
+    uint64_t slice_mmap_n, slice_mmap_bytes;
+    uint64_t stage_n, stage_bytes;
     int pin_on;              /* D5f: pin hot per-token weights in RAM (FATCAT_PIN=0 off) */
     void **pins; size_t n_pins, pins_cap;   /* anonymous copies backing pinned weights */
     long pinned_mb;          /* total pinned bytes / MB (charged to the budget) */
@@ -477,6 +485,7 @@ static void gemv_expert(fatcat_ml4 *m, const wt_t *w, const char *src, int64_t s
         if (!done && !async) {
             h = fatcat_gpu_stage(w->type, src, (size_t)stride, tag);
             if (h) {
+                m->stage_n++; m->stage_bytes += (uint64_t)stride;
                 done = fatcat_gpu_gemv(h, w->type, x, y, n_out, n_in);
                 fatcat_gpu_release(h);
             }
@@ -1046,6 +1055,16 @@ void fatcat_ml4_get_skip(const fatcat_ml4 *m, uint64_t *n, uint64_t *w)
     if (w) *w = m->skip_w;
 }
 
+void fatcat_ml4_get_stage(const fatcat_ml4 *m, uint64_t *slice_n,
+                          uint64_t *slice_bytes, uint64_t *stage_n,
+                          uint64_t *stage_bytes)
+{
+    if (slice_n) *slice_n = m->slice_mmap_n;
+    if (slice_bytes) *slice_bytes = m->slice_mmap_bytes;
+    if (stage_n) *stage_n = m->stage_n;
+    if (stage_bytes) *stage_bytes = m->stage_bytes;
+}
+
 fatcat_ml4_info fatcat_ml4_get_info(const fatcat_ml4 *m) { return m->info; }
 /* ---------- forward pass ---------- */
 
@@ -1078,6 +1097,9 @@ static const char *expert_slice(fatcat_ml4 *m, const wt_t *w, int64_t stride,
             *key_out = key;
             return p;
         }
+        /* Pista A: tier could not serve this slice (no evictable slot /
+         * fill failure) -> mmap fallback -> GPU will double-read it. */
+        m->slice_mmap_n++; m->slice_mmap_bytes += (uint64_t)stride;
     }
     return base;
 }

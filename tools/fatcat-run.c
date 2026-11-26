@@ -31,6 +31,7 @@
 
 #include "fatcat/engine.h"
 #include "fatcat/stream.h"
+#include "fatcat/gpu.h"
 
 #include "trace_seq.h"
 
@@ -242,6 +243,24 @@ int main(int argc, char **argv)
                         "(%.2f GB/s)  engine-only %.2f GB (%.2f GB/s)\n",
                         iob / 1e9, iot, iob / 1e9 / iot,
                         ios / 1e9, ios / 1e9 / iot);
+            uint64_t mj = fatcat_engine_majflt_bytes(e);
+            if (mj)
+                fprintf(stderr, "decode majflt: %.2f GB mmap refaults "
+                        "(non-ring reader: %.2f GB)\n",
+                        mj / 1e9, (iob > ios ? iob - ios : 0) / 1e9);
+        }
+        {   /* Pista A: double-read audit (mmap fallback + GPU staging) */
+            uint64_t sn, sb, tn, tb;
+            fatcat_engine_stage_stats(e, &sn, &sb, &tn, &tb);
+            uint64_t gc, gb, gh;
+            fatcat_gpu_stats(&gc, &gb, &gh);
+            fprintf(stderr, "staging audit: mmap-fallback slices %llu (%.2f GB)  "
+                    "gpu-stage %llu (%.2f GB)  gpu-copies %llu (%.2f GB, "
+                    "stage-hits %llu)\n",
+                    (unsigned long long)sn, sb / 1e9,
+                    (unsigned long long)tn, tb / 1e9,
+                    (unsigned long long)gc, gb / 1e9,
+                    (unsigned long long)gh);
         }
     }
     int spec_on; uint64_t s_steps, s_fed, s_emit;
