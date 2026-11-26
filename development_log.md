@@ -1981,3 +1981,16 @@ proven to be llama.cpp's lossy fast kernels, not a fatcat error.
 - Speed story final numbers this week: 0.86 -> 1.02 tok/s benchmark,
   0.86 -> 1.00 tok/s real chat. Software backlog exhausted; remaining
   lever is Pista D (second NVMe).
+
+## 2026-11-26 — Session 48b: docs synced to the Pista A+B reality
+
+- README: headline speed claim updated — decode is prefetch-latency-bound
+  (the "NVMe-bandwidth-bound" verdict is retracted), ~1.0 tok/s on the
+  real-chat benchmark, ~1.4 tok/s short-context sweep (pre-levers,
+  conservative).
+- Manuals/io/memory-tuning.md: decode bullet rewritten — readahead root
+  cause + FATCAT_RAND=1 default, FATCAT_SPECP=2 default with the +18.6%/
+  +16.3% A/B numbers, depth-4 tier-pollution note; tier curve flattening
+  at 64 GB unchanged.
+- tools/development.md: registered io_sampler.py, predict-study.py,
+  chat-prompt.py + chat-real.json + chat-ab.sh.

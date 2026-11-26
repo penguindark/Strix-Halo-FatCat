@@ -54,7 +54,17 @@ router traces before touching the engine.
   and sweeps FATCAT_SKIP thresholds — cold bytes saved vs router weight
   dropped, to pick tau before touching the engine) ✅,
   `spec-oracle.sh` (H2: batched-verify cost measurement, verdict archived
-  in development_log S43b) ✅.
+  in development_log S43b) ✅,
+  `io_sampler.py` (Pista A: per-task read_bytes deltas system-wide during a
+  run — attributes device reads to the exact thread; proved the fill
+  worker alone reads at line rate, no io-wq/kworker) ✅,
+  `py/predict-study.py` (Specter-style proxy study: trains an inter-layer
+  affinity table on FCTS traces; verdict 23-25% vs shipped 65.3%, rejected,
+  S46) ✅, `py/chat-prompt.py` (renders a multi-turn conversation JSON into
+  the Mistral-Large-4 chat token stream for offline A/B) +
+  `data/chat-real.json` (630-tok real-chat A/B prompt) + `chat-ab.sh`
+  (external-validity A/B: current defaults vs pre-Pista on real chat,
+  +16.3% decode confirmed, S48) ✅.
   Scripts allowed here (Python acceptable for analysis-only
   tools; engine itself stays C). Later: GGUF repacker for per-layer/tier mixed
   quantization (deferred step).

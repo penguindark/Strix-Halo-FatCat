@@ -16,8 +16,12 @@ a three-tier hierarchy and streams routed experts from NVMe on demand:
 | Cold | NVMe SSD | everything else, streamed via `io_uring` |
 | Compute | iGPU (gfx1151) + Zen 5 CPU (AVX-512) | HIP kernels + CPU reference kernels |
 
-Decode is NVMe-bandwidth-bound by design; the tuned recipe reaches
-**~1.4 tok/s decode** end-to-end. See `Manuals/io/memory-tuning.md` for the
+Decode is prefetch-latency-bound by design (the NVMe has measured headroom —
+Session 44 proved the old "bandwidth-bound" verdict was kernel readahead
+waste, now disabled): the tuned recipe reaches **~1.0 tok/s** on a realistic
+630-token multi-turn chat with a 256-token generation, and **~1.4 tok/s** on
+the short-context tier sweep (measured before the Session 44–45 levers, so
+likely conservative). See `Manuals/io/memory-tuning.md` for the
 measured operating points and `development_log.md` for the full history.
 
 ## Requirements

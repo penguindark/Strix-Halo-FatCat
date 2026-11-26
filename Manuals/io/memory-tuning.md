@@ -69,19 +69,28 @@ FATCAT_WARM_MB=86016 FATCAT_MEM_LIMIT_MB=110000
   page cache grew until the OOM killer took the assistant down (Session
   40c). 110000 keeps drop_experts off on an idle 128 GB box while still
   capping runaway growth.
-- Decode (Session 42, D5f + 42f): decode is NVMe-bandwidth-bound; the
-  warm-tier curve on policy100: 0.69 / 1.07 / 1.34 / 1.43 tok/s at 18 /
-  40 / 64 / 86 GB (hit 77.2% @64, 79.5% @86) - the curve flattens at 64
-  GB, so 64 is the default. Expert speculation prefetch is OFF by default
-  (`FATCAT_SPECP=0`): at 64 GB it was speed-neutral and cost ~1 GB/token
-  of NVMe bandwidth the critical reads need. `FATCAT_PIN=1` (pin ~16 GB
-  hot weights to anonymous RAM) measured flat - leave off unless NVMe
-  refaults ever dominate. Prefill anti-thrash is ON by default
-  (`FATCAT_NOPROMO=2`, Session 43f): prefill cache misses enter the warm
-  tier only on a 2nd reference within the same prefill, so one-shot
-  prompt experts stop evicting decode-hot experts - A/B: decode +5.9%,
-  prefill +9.0%. `FATCAT_NOPROMO=0` restores the old promote-everything
-  behavior; `=1` (never promote) is worse than 2 on both phases.
+- Decode (Sessions 42 → 48): the warm-tier curve on policy100 flattens at
+  64 GB (0.69 / 1.07 / 1.34 / 1.43 tok/s at 18 / 40 / 64 / 86 GB), so 64 is
+  the default. The old "NVMe-bandwidth-bound" verdict (Session 42) is
+  RETRACTED: Session 44 traced the extra device bytes to this box's
+  `read_ahead_kb=4096` dragging ~4 MB of dead bytes after every random
+  ~8 MB ring read; the stream now reads through a `POSIX_FADV_RANDOM` fd
+  (`FATCAT_RAND=1`, default) and device bytes match ring bytes to 0.1%,
+  leaving ~1.2 GB/s of drive headroom. The real limiter is PREFETCH
+  LATENCY: every tier miss stalls the producer on its fill. Expert
+  speculation is therefore ON by default (`FATCAT_SPECP=2`, Session 45):
+  the next-layer router guess (65% accurate) prefetches behind the current
+  critical reads and lands during the GEMVs — A/B +18.6% decode on the
+  474-tok benchmark, +16.3% on a real 630-tok chat, for +14% ring bytes;
+  depth 4 costs more bytes and measures slower (tier pollution).
+  `FATCAT_PIN=1` (pin ~16 GB hot weights to anonymous RAM) measured flat -
+  leave off unless NVMe refaults ever dominate. Prefill anti-thrash is ON
+  by default (`FATCAT_NOPROMO=2`, Session 43f): prefill cache misses enter
+  the warm tier only on a 2nd reference within the same prefill, so
+  one-shot prompt experts stop evicting decode-hot experts - A/B: decode
+  +5.9%, prefill +9.0%. `FATCAT_NOPROMO=0` restores the old
+  promote-everything behavior; `=1` (never promote) is worse than 2 on
+  both phases.
 
 - `FATCAT_WARM_MB=65536`: with the assistant gone, cache ~64 GB of experts
   (model is 218 GB on disk, so this is the single biggest prefill lever:
