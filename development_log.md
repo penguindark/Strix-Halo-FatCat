@@ -1943,3 +1943,41 @@ proven to be llama.cpp's lossy fast kernels, not a fatcat error.
   cycle. The decode lever now sits at prefetch LEAD TIME (Pista B done)
   and hardware (Pista D second NVMe). Tool kept in tools/py/ for the
   record.
+
+## 2026-11-26 — Session 47: external-validity chat A/B prepared
+
+- Backlog: confirm the Pista A+B decode gain (+19% on the 474-tok greedy
+  benchmark) generalises to REAL chat content and a longer generation.
+- New tooling (CPU-side, no GPU needed to build):
+  * tools/py/chat-prompt.py — renders a multi-turn conversation JSON into
+    the Mistral-Large-4 chat token stream (same template chat.py drives:
+    user turns in [INST]..[/INST], assistant turns raw + EOS, BOS/SYS/
+    MODEL_SETTINGS headers). Output feeds fatcat-run --tokens.
+  * tools/data/chat-real.json — a 5-turn coding-assistant conversation
+    (NL + C code + a readahead question), tokenises to 630 tokens
+    (longer than the 474 benchmark, deliberately different expert mix).
+  * tools/chat-ab.sh — runs the SAME chat prompt twice, fresh process
+    each (fresh warm tier, benchmark methodology): NEW = current defaults
+    (SPECP=2, RAND=1) vs OLD = pre-Pista (SPECP=0 RAND=0), -n 256.
+    Prints decode tok/s for each; expect NEW > OLD ~15-20%.
+- GPU run pending (user stops the assistant LLM, ~16 min for both runs).
+
+## 2026-11-26 — Session 48: chat A/B — Pista A+B gains GENERALIZE off-benchmark
+
+- tools/chat-ab.sh on a realistic 630-tok multi-turn coding chat (5 turns,
+  NL+C code), -n 256, fresh process per arm (fresh warm tier):
+  * NEW (SPECP=2, RAND=1): decode 1.00 tok/s, prefill 2.34, device
+    680.66 GB vs ring 681.16 GB (accounting closes to 0.07%).
+  * OLD (SPECP=0, RAND=0): decode 0.86 tok/s, prefill 2.48, device
+    939.19 GB vs ring 630.62 GB (+49% readahead waste, re-proves Pista A
+    on new content).
+- Decode +16.3% (1.00 vs 0.86) — matches the +18.6% benchmark gain: the
+  levers generalise to real chat content and a 5x longer generation.
+  Speculation covered 338->279 GB of misses at 41% of ring bytes; hit
+  volume rose 1275->1374 GB (guesses warm the tier for later turns).
+- Prefill -5.6% (2.34 vs 2.48): speculation is decode-path only, so this
+  is within run-to-run noise seen all week (prefill ranged 2.35-2.84
+  across arms); no action.
+- Speed story final numbers this week: 0.86 -> 1.02 tok/s benchmark,
+  0.86 -> 1.00 tok/s real chat. Software backlog exhausted; remaining
+  lever is Pista D (second NVMe).
