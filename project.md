@@ -264,6 +264,10 @@ Full doctrine: `docs/performance.md`. Key numbers (4-bit weights):
   `FATCAT_SPECP=2`: standalone A/B +18.6% decode (0.86 -> 1.02 tok/s on
   the 474-tok benchmark) for +14% ring bytes; depth 4 costs 30% more
   bytes and measures slower (tier pollution from wrong guesses).
+  Confirmed off-benchmark (Session 48, `tools/chat-ab.sh`): +16.3%
+  decode on a realistic 630-tok multi-turn chat with a 256-tok
+  generation; the OLD arm also re-showed the readahead waste (+49%
+  device bytes over ring) on new content.
 - Specter-style proxy routing predictor ❌ REJECTED by offline study
   (Session 46, `tools/py/predict-study.py`, no GPU needed): a learned
   inter-layer affinity table (train on prefill routing, predict next
