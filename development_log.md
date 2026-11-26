@@ -1919,3 +1919,27 @@ proven to be llama.cpp's lossy fast kernels, not a fatcat error.
   474-tok standalone benchmark decode moved 0.86 -> 1.02 tok/s (+19%)
   this week; the "speed CLOSED, needs hardware" verdict from S43f is
   formally retracted — two software levers were still on the table.
+
+## 2026-11-26 — Session 46: Specter-style proxy predictor REJECTED (offline study)
+
+- Backlog item 2 was a learned routing predictor to beat the stale-router
+  guess (65.3%). Studied offline first (CPU, free) with
+  tools/py/predict-study.py on two real FCTS traces (h3-decode 537 tok,
+  mixed977 977 tok): train an inter-layer affinity table
+  W[(L-1,e)][(L,f)] += co-route count on prefill tokens, then predict
+  layer L's experts from layer L-1's actual ids on decode tokens
+  (no leakage).
+- Result: affinity predictor = 23-25% engine-hit at every train/eval
+  split and alpha (freq prior adds nothing); global-frequency 17-20%;
+  shipped stale-router 65.3%. The proxy is 2.6x WORSE than what we ship.
+- Why: the shipped guess reuses the REAL next-layer router on a nearly-
+  fresh hidden state (only the current FFN delta missing), so it already
+  captures token-specific routing content. Pure structural co-occurrence
+  (which expert tends to follow which) is a much weaker signal — it
+  cannot see the token. Specter's proxy predicts from EARLIER layers
+  because it has no router access; we do, so the proxy is strictly
+  dominated here.
+- Verdict: no implementation, no GPU run. Saves a full build+measure
+  cycle. The decode lever now sits at prefetch LEAD TIME (Pista B done)
+  and hardware (Pista D second NVMe). Tool kept in tools/py/ for the
+  record.

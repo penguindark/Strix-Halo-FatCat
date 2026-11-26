@@ -264,6 +264,15 @@ Full doctrine: `docs/performance.md`. Key numbers (4-bit weights):
   `FATCAT_SPECP=2`: standalone A/B +18.6% decode (0.86 -> 1.02 tok/s on
   the 474-tok benchmark) for +14% ring bytes; depth 4 costs 30% more
   bytes and measures slower (tier pollution from wrong guesses).
+- Specter-style proxy routing predictor ❌ REJECTED by offline study
+  (Session 46, `tools/py/predict-study.py`, no GPU needed): a learned
+  inter-layer affinity table (train on prefill routing, predict next
+  layer's experts from the previous layer's ids) scores 23-25% engine-hit
+  on two real traces at any train/eval split — 2.6x WORSE than the
+  shipped guess (65.3%). The shipped predictor reuses the REAL router on
+  a nearly-fresh hidden state (only the current FFN delta is missing),
+  so token-specific routing content is already captured; pure structural
+  co-occurrence cannot substitute for it. No implementation pursued.
 
 ### Next implementations (queued backlog, in priority order)
 
